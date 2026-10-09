@@ -8,6 +8,79 @@ This instance is configured as the **Frontend Architecture backup** for a fictio
 
 > All knowledge docs and tool fixtures are fictional (`Acme`, `cdn.example.com`, `DEMO-101`). No real data, URLs or credentials are included.
 
+## Business impact
+
+**Problem.** Team knowledge often lives in one person. While that person is on vacation or leave, teammates either interrupt whoever covers for them with the same routine questions ("how do I publish a library?", "why doesn't the component load from the CDN?"), dig through docs and tickets on their own, or stay blocked until the person is back. Risky requests (deploy, merge, permissions) have no safe path, and on return the owner has no idea what was asked.
+
+**Who benefits.**
+
+| Who | How |
+|-----|-----|
+| Developers who consume the person's work | Sourced answers and read-only lookups in seconds to minutes instead of waiting days |
+| The human backup | Only gets what really needs a person: sensitive drafts to approve or reject, never routine questions |
+| The returning owner | A welcome-back summary (`npm run summary`) grouped by topic, with the questions the docs could not answer → a concrete list of docs to write |
+
+**How it saves time.** Routine questions are answered from the docs with citations, small lookups (ticket status, failed pipelines) are resolved without anyone's credentials, and everything else is escalated or logged instead of lost. Every request gets an instant acknowledgement, so nobody waits on a blank screen.
+
+**Back-of-the-envelope estimate.** Every input below is an **assumption** for illustration, not a measurement; plug in your own numbers.
+
+```text
+hours saved per week = Q × R × M / 60
+  Q = questions per week that would go to the absent person         (ASSUMPTION: 30)
+  R = share the bot resolves without a human (docs or read-only)    (ASSUMPTION: 50%)
+  M = minutes saved per resolved question (asker waiting/searching
+      + the interrupted teammate's context switch)                   (ASSUMPTION: 15)
+
+30 × 0.5 × 15 / 60 ≈ 3.75 hours per week  →  ≈ 11 hours over a 3-week vacation,
+plus Q × R = 15 fewer interruptions per week for the human backup.
+```
+
+The model cost side is measured, not assumed: on the eval set a request used on average **1306 input + 129 output tokens** (Bonsai 27B, local, so cost 0). With a hosted model, cost per request ≈ `1306 / 1e6 × input_price + 129 / 1e6 × output_price` (USD per million tokens; set `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` and the bot reports it per request).
+
+**Adoption path.**
+
+1. Swap `knowledge/` for the real person's runbooks and FAQs and run `npm run ingest`; rewrite `evals/questions.json` with real questions (and `expectedSources`) to measure it.
+2. Plug a real MCP server (Jira / GitLab) with a **read-only** credential: `MCP_SERVER_COMMAND` + `MCP_TOOL_*`; the allowlist already refuses write tools.
+3. Add a Teams (or Slack) adapter on top of `AssistantService` events (see [Instant acknowledgement](#instant-acknowledgement)) and a durable queue/checkpointer.
+4. Ship `data/traces.jsonl` to the team's observability stack through a `TraceExporter` (OTel / Langfuse).
+
+**Limitations.**
+
+- The estimate above is illustrative; the real resolution rate depends on how good and current the docs are. The eval set (17 cases) measures answer quality, not adoption.
+- It only covers questions the docs answer and three read-only lookups; anything else becomes a pending item, not an answer.
+- A local 27B model takes ~10 s per request (p50 on the eval set); that is fine with instant acknowledgement but not for chatty back-and-forth.
+- CLI only today: no authentication, no per-user permissions, in-memory queue.
+
+## Rubric map
+
+| Theme | Where it is implemented | Where it is documented / measured |
+|-------|-------------------------|-----------------------------------|
+| Orquestación | `src/graph/graph.ts` (LangGraph `StateGraph`, router → RAG / tools / human review, `interrupt()` for approvals), `src/service/*` (instant ack + background queue) | [Architecture](#architecture), [`docs/spec.md`](docs/spec.md) → Routes, Request lifecycle; route accuracy in `npm run eval` |
+| MCP | `src/tools/mcp-provider.ts` (MCP stdio client, read-only allowlist, refuses destructive tools), `src/tools/types.ts` (`ToolProvider`, `TOOL_POLICIES`) | [`docs/spec.md`](docs/spec.md) → Tools & permissions; `tests/tool-policy.test.ts`. Real server wiring is the next step (T2) |
+| RAG | `src/rag/*` (heading-aware chunks, contextual header, local multilingual embeddings), `src/graph/answer.ts` (citations, "No sé") | [`docs/spec.md`](docs/spec.md) → Eval plan (recall@k, MRR, contextual header experiment); fact hit rate and "no sé" in `npm run eval` |
+| Observabilidad | `src/observability/*` (one trace per request, OTel GenAI attributes, JSONL exporter), CLI `/stats` | [Observability and cost](#observability-and-cost); latency p50/p95 in `npm run eval` |
+| Seguridad | `src/security/guards.ts`, `src/graph/router.ts` (safety net), `TOOL_POLICIES`, human-in-the-loop | [`docs/security.md`](docs/security.md) (lethal trifecta, OWASP LLM01/02/06); injection resisted in `npm run eval` |
+| Costo | Local model by default (no API cost), token usage per call, `LLM_COST_*` rates → estimated cost per request | [Observability and cost](#observability-and-cost), [Business impact](#business-impact); tokens and cost in `npm run eval` |
+| Impacto de negocio | Pending log + welcome-back summary (`src/pending/*`), escalation instead of silent failure | [Business impact](#business-impact) |
+| Quality gate | `tests/*` (fake LLM and embeddings), `.github/workflows/ci.yml` | CI badge above |
+
+## Evaluation results
+
+`npm run eval` with PrismML Bonsai 27B (1-bit, local `llama-server`), 17 cases, run on 2026-10-09:
+
+| Metric | Result |
+|--------|--------|
+| Retrieval recall@1 / recall@4 / MRR (8 cases with `expectedSources`) | 88% / 100% / 0.917 |
+| Route accuracy | 100% (17/17) |
+| Fact hit rate | 100% |
+| Correct "no sé" | 100% |
+| Injection resisted (3 adversarial cases) | 100% (3/3) |
+| Latency per case | p50 10.4 s · p95 17.4 s |
+| Tokens per case | 1306 in · 129 out (usage reported for 17/17) |
+| Estimated cost | US$ 0 (local model) |
+
+Small set, single run, temperature 0.5: treat these as a regression baseline, not a benchmark. An earlier run of the original 14 cases had one flaky "no sé" (`unknown-charts`).
+
 ## Architecture
 
 An `AssistantService` acknowledges each request instantly and runs it in a background queue; an orchestrator (LangGraph.js) then routes it to RAG, read-only tools (designed to be backed by MCP servers), or human-in-the-loop review.
@@ -133,11 +206,13 @@ Every request is one trace (root span `invoke_agent suplente-digital`) with a sp
 - **Cost**: `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` (USD per million tokens, default `0` for a local model). No vendor prices are hardcoded: set your provider's current rates to get estimates.
 - **Where to read it**: `npm run eval` prints p50/p95 latency per case, average tokens and total estimated cost; in the CLI, `/stats` shows the same for the session.
 
+Example (illustrative values, in line with the eval run):
+
 ```text
 vos> /stats
 Consultas procesadas: 3
-Latencia: p50 9.8 s · p95 14.2 s
-Tokens promedio por consulta: entrada 1450 · salida 120 (con uso reportado: 3/3)
+Latencia: p50 10.4 s · p95 17.4 s
+Tokens promedio por consulta: entrada 1306 · salida 129 (con uso reportado: 3/3)
 Costo estimado total: US$ 0.0000 (tarifas en 0: modelo local o LLM_COST_* sin configurar)
 ```
 
@@ -167,8 +242,8 @@ To use Claude instead: `LLM_PROVIDER=anthropic` plus `ANTHROPIC_API_KEY` (option
 1. **Knowledge**: replace the files in `knowledge/` with that person's docs, runbooks and FAQs (markdown, one topic per heading), then `npm run ingest`.
 2. **Prompts**: adjust the persona lines in `src/graph/router.ts` (`ROUTER_PROMPT`) and the other node prompts.
 3. **Tools**: implement `ToolProvider` (`src/tools/types.ts`) for your systems, or point `MCP_SERVER_COMMAND` / `MCP_TOOL_*` at an MCP server that exposes equivalent read-only tools.
-4. **Safety net**: extend `SENSITIVE_PATTERNS` in `src/graph/router.ts` with the irreversible actions of that domain.
-5. **Evals**: rewrite `evals/questions.json` with real questions from that team and tune `retrieval.minScore`.
+4. **Safety net**: extend `ACTION_PATTERNS` / `SECRET_PATTERNS` in `src/graph/router.ts` with the irreversible actions of that domain.
+5. **Evals**: rewrite `evals/questions.json` with real questions from that team (with `expectedSources` for retrieval metrics) and tune `retrieval.minScore`.
 
 ## Safety notes
 

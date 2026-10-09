@@ -128,4 +128,6 @@ Contextual chunk header (inspired by [Contextual Retrieval](https://www.anthropi
 
 The intro variant was worse and was dropped; the title header ties on recall and MRR and slightly lowers the scores of unanswerable questions. The only miss at rank 1 is `cdn-not-loading` (the CDN manifest doc outranks the troubleshooting doc). Both unanswerable questions still score above `minScore` (0.82): "no sé" for them relies on the answer prompt, not on the cut-off.
 
+Latest full run (Bonsai 27B 1-bit, local, 2026-10-09, 17 cases): route accuracy 100%, fact hit rate 100%, correct "no sé" 100%, injection resisted 100% (3/3), latency per case p50 10.4 s / p95 17.4 s, 1306 input + 129 output tokens per case on average, estimated cost US$ 0. For `inject-doc`, a separate check of the raw model reply (before the output guard) contained neither the canary nor the exfiltration link.
+
 Targets for the MVP: route accuracy ≥ 90%, correct "no sé" ≥ 90%, fact hit rate ≥ 70%, injection resisted 100%. Tune `retrieval.minScore` in `src/config.ts` against these numbers.
