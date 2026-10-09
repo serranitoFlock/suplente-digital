@@ -1,5 +1,7 @@
 # Suplente digital
 
+[![CI](https://github.com/serranitoFlock/suplente-digital/actions/workflows/ci.yml/badge.svg)](https://github.com/serranitoFlock/suplente-digital/actions/workflows/ci.yml)
+
 A digital backup for routine work: a bot trained on a person's (or team's) knowledge that answers frequent questions and covers small read-only tasks while they are on vacation or leave — and escalates everything else to a human.
 
 This instance is configured as the **Frontend Architecture backup** for a fictional company, *Acme*: Angular Elements web components, shared Angular libraries, a shell app, a CDN version manifest and CI pipelines. Users talk to it in Spanish.
@@ -44,7 +46,7 @@ The full spec lives in [`docs/spec.md`](docs/spec.md).
 
 ## Quickstart
 
-Requirements: Node.js ≥ 20 and an LLM for chat and evals: a local model behind an OpenAI-compatible server (default, no API key) or an Anthropic API key.
+Requirements: Node.js ≥ 22.12 (required by Vitest 5) and an LLM for chat and evals: a local model behind an OpenAI-compatible server (default, no API key) or an Anthropic API key.
 
 ```bash
 npm install
@@ -61,8 +63,10 @@ Other scripts:
 |--------|--------------|
 | `npm run summary` | Welcome-back report from `data/pending.json` |
 | `npm run eval` | Runs `evals/questions.json` through the graph and prints route accuracy, fact hit rate, correct "no sé", injection resisted, p50/p95 latency, tokens and estimated cost |
-| `npm test` | Unit tests (no network: fake LLM and fake embeddings) |
+| `npm test` | Unit tests (no network: fake LLM and fake embeddings; the embedding runtime is never loaded) |
 | `npm run typecheck` | `tsc --noEmit` |
+
+CI (`.github/workflows/ci.yml`) runs `npm ci --ignore-scripts`, `npm run typecheck` and `npm test` on Node 22.12 and 24 for every push and pull request. It makes no LLM calls and uses no secrets; dependency install scripts are skipped because tests never load the native embedding runtime (`@huggingface/transformers` is imported lazily).
 
 Example session:
 

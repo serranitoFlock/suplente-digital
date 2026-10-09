@@ -98,6 +98,7 @@ Threat model and residual risks: [`security.md`](security.md).
 - [x] `npm run summary` groups pending entries by topic and suggests docs to write.
 - [x] Everything runs without credentials except the LLM calls (mock tools, local embeddings).
 - [x] Every request gets an instant acknowledgement (no model call); results, approval requests and failures arrive later as events tagged with the request number.
+- [x] CI runs typecheck and unit tests on every push and pull request (Node 22.12 and 24), without LLM calls, network-dependent tests or secrets.
 - [x] Unit tests cover chunking, ranking, router parsing, safety net, pending store/summary, tools, graph flows and the assistant service (ack, queue limit, done / failed / approval flows) with a fake LLM or fake graph.
 
 ## Eval plan

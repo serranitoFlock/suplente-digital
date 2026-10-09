@@ -5,7 +5,7 @@
   "description": "Digital backup agent that covers routine questions and read-only tasks while a person or team is away.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",

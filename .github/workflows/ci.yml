@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: typecheck + tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # Lowest version allowed by package.json "engines" (vitest 5 needs ^22.12) and the current LTS.
+        node: ["22.12", "24"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      # --ignore-scripts: no dependency install scripts run in CI (supply-chain hardening, and npm 11
+      # "allowScripts" approvals become irrelevant). Tests use a fake LLM and fake embeddings, so the
+      # onnxruntime-node / transformers runtime is never loaded. No secrets, no network calls in tests.
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test

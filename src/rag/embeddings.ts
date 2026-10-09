@@ -1,4 +1,4 @@
-import { env, pipeline, type FeatureExtractionPipeline } from "@huggingface/transformers";
+import type { FeatureExtractionPipeline } from "@huggingface/transformers";
 
 export interface Embedder {
   readonly model: string;
@@ -35,6 +35,9 @@ export class LocalE5Embedder implements Embedder {
   }
 
   private async load(): Promise<FeatureExtractionPipeline> {
+    // Imported lazily: loading transformers pulls in the onnxruntime-node native binary, which unit
+    // tests and CI never need (they use a fake embedder).
+    const { env, pipeline } = await import("@huggingface/transformers");
     env.cacheDir = this.cacheDir;
     return (await pipeline("feature-extraction", this.model)) as FeatureExtractionPipeline;
   }
