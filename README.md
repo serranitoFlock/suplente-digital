@@ -123,7 +123,7 @@ Requisitos: Node.js ≥ 22.12 (exigido por Vitest 5) y un LLM para el chat y las
 
 ```bash
 npm install
-cp .env.example .env          # pick the LLM (see "Run with a local model")
+cp .env.example .env          # pick the LLM (see "Ejecutar con un modelo local")
 npm run ingest                # downloads the embedding model once, builds data/index.json
 npm run dev                   # interactive chat
 ```
