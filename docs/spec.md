@@ -150,7 +150,7 @@ Threat model and residual risks: [`security.md`](security.md).
 
 ## Eval plan
 
-`evals/questions.json` holds 24 cases (answerable, must-say-"no sé", tasks, sensitive, refusals, out-of-scope, 3 adversarial prompt-injection cases, 2 multi-turn cases, 1 capabilities question and 4 Engram cases whose facts exist only in `knowledge/engram-sample.json`). A multi-turn case lists earlier user messages in `conversation` (run through the graph first; their turns become the history) or a fixed `history`; `mustNotCallTools` and `mustNotMention` check that a follow-up never invents an id. `npm run eval` runs them through the real graph (configured LLM — local OpenAI-compatible model by default or Claude — + local embeddings + mock tools, isolated pending log; escalations auto-rejected) and reports:
+`evals/questions.json` holds 26 cases (answerable — 2 of them in informal phrasing with abbreviations —, must-say-"no sé", tasks, sensitive, refusals, out-of-scope, 3 adversarial prompt-injection cases, 2 multi-turn cases, 1 capabilities question and 4 Engram cases whose facts exist only in `knowledge/engram-sample.json`). A multi-turn case lists earlier user messages in `conversation` (run through the graph first; their turns become the history) or a fixed `history`; `mustNotCallTools` and `mustNotMention` check that a follow-up never invents an id. `npm run eval` runs them through the real graph (configured LLM — local OpenAI-compatible model by default or Claude — + local embeddings + mock tools, isolated pending log; escalations auto-rejected) and reports:
 
 - **Route accuracy** — router decision vs expected route.
 - **Fact hit rate** — expected key facts found in the reply body (sources excluded).
@@ -163,6 +163,7 @@ Before generation, a retriever-only pass ranks the whole index (no `minScore` cu
 
 - **Recall@1 / recall@k** (k = `retrieval.docSlots` = 4) — share of expected knowledge files among the top chunks.
 - **MRR** — mean of 1 / rank of the first chunk from an expected file.
+- **Context share** — mean fraction of the chunks actually passed to the model (the source-balanced context, `retrieval` config) that come from an expected file. Recall@k can stay at 100% while unrelated notes fill most of the context; this catches it. With 4 doc + 2 Engram slots, a question answered by one curated doc tops out at 4/6 ≈ 67%.
 - **Unanswerable cases above `minScore`** — guard rail for "no sé": top score of the `mustSayNoSe` questions.
 
 `npm run eval:retrieval` runs only this pass (no LLM).

@@ -10,7 +10,7 @@ import { computeStats, formatUsd } from "../src/observability/stats.js";
 import { JsonlTraceExporter, Tracer, type TraceSummary } from "../src/observability/tracing.js";
 import { PendingStore } from "../src/pending/store.js";
 import { LocalE5Embedder } from "../src/rag/embeddings.js";
-import { mean, recallAtK, reciprocalRank } from "../src/rag/metrics.js";
+import { contextShare, mean, recallAtK, reciprocalRank } from "../src/rag/metrics.js";
 import { Retriever, type VectorIndex } from "../src/rag/retriever.js";
 import { MockToolProvider } from "../src/tools/mock-provider.js";
 import { countFacts, injectionResisted, mergeSummaries } from "./scoring.js";
@@ -47,8 +47,9 @@ const isMultiTurn = (c: EvalCase) => Boolean(c.conversation?.length || c.history
 const pctOf = (value: number | undefined) => (value === undefined ? "n/a" : `${Math.round(100 * value)}%`);
 
 /**
- * Retriever-only pass, before any generation: recall@k and MRR over the cases with `expectedSources`.
- * Ranks the whole index (no `minScore` cut-off) so the metric isolates ranking quality.
+ * Retriever-only pass, before any generation: recall@k and MRR over the cases with `expectedSources`
+ * rank the whole index (no `minScore` cut-off) so they isolate ranking quality; context share looks at
+ * the source-balanced context actually passed to the model (`config.retrieval`).
  */
 async function evaluateRetrieval(cases: EvalCase[], embedder: LocalE5Embedder): Promise<void> {
   const k = config.retrieval.docSlots;
@@ -57,6 +58,7 @@ async function evaluateRetrieval(cases: EvalCase[], embedder: LocalE5Embedder): 
   for (const testCase of cases) {
     if (!testCase.expectedSources?.length) continue;
     const ranked = (await ranker.rank(testCase.question)).map((chunk) => chunk.source);
+    const context = (await ranker.retrieve(testCase.question)).map((chunk) => chunk.source);
     rows.push({
       id: testCase.id,
       expected: testCase.expectedSources.join(", "),
@@ -64,12 +66,14 @@ async function evaluateRetrieval(cases: EvalCase[], embedder: LocalE5Embedder): 
       "recall@1": recallAtK(ranked, testCase.expectedSources, 1),
       [`recall@${k}`]: recallAtK(ranked, testCase.expectedSources, k),
       rr: Number(reciprocalRank(ranked, testCase.expectedSources).toFixed(3)),
+      contextShare: Number(contextShare(context, testCase.expectedSources).toFixed(2)),
     });
   }
   console.table(rows);
   console.log(`Retrieval recall@1:  ${pctOf(mean(rows.map((r) => r["recall@1"])))}`);
   console.log(`Retrieval recall@${k}:  ${pctOf(mean(rows.map((r) => r[`recall@${k}`] as number)))}`);
   console.log(`Retrieval MRR:       ${mean(rows.map((r) => r.rr))?.toFixed(3) ?? "n/a"} (${rows.length} cases with expectedSources)`);
+  console.log(`Context share:       ${pctOf(mean(rows.map((r) => r.contextShare)))} (chunks passed to the model that come from the expected sources)`);
 
   // Guard rail for the "no sé" behavior: unanswerable questions should stay below the score cut-off.
   const { minScore } = config.retrieval;

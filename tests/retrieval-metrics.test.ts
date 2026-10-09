@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { contextualPassage, documentTitle } from "../src/rag/ingest.js";
-import { mean, recallAtK, reciprocalRank } from "../src/rag/metrics.js";
+import { contextShare, mean, recallAtK, reciprocalRank } from "../src/rag/metrics.js";
 
 describe("retrieval metrics", () => {
   const ranked = ["a.md", "b.md", "a.md", "c.md", "d.md"];
@@ -37,5 +37,18 @@ describe("contextual chunk header", () => {
       "Documento: Publicar una librería\nSección: Publicar una librería > Pasos\nCorrer el pipeline.",
     );
     expect(contextualPassage({ ...chunk, heading: "" }, "")).toBe("Documento: x.md\nCorrer el pipeline.");
+  });
+});
+
+describe("contextShare", () => {
+  it("is the fraction of context chunks that come from an expected source", () => {
+    expect(contextShare(["a.md", "a.md", "engram:#1", "b.md"], ["a.md"])).toBe(0.5);
+    expect(contextShare(["a.md", "b.md"], ["a.md", "b.md"])).toBe(1);
+    expect(contextShare(["engram:#1"], ["a.md"])).toBe(0);
+  });
+
+  it("is 0 for an empty context and needs an expected source", () => {
+    expect(contextShare([], ["a.md"])).toBe(0);
+    expect(() => contextShare(["a.md"], [])).toThrow();
   });
 });

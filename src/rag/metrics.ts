@@ -16,6 +16,17 @@ export function reciprocalRank(rankedSources: string[], expected: string[]): num
   return rank === -1 ? 0 : 1 / (rank + 1);
 }
 
+/**
+ * Share of the chunks passed to the model (the answer context, in order) that come from an expected
+ * document. Recall@k can stay at 100% while terse unrelated notes fill most of the context; this
+ * catches that. 0 for an empty context.
+ */
+export function contextShare(contextSources: string[], expected: string[]): number {
+  if (expected.length === 0) throw new Error("contextShare needs at least one expected source.");
+  if (contextSources.length === 0) return 0;
+  return contextSources.filter((source) => expected.includes(source)).length / contextSources.length;
+}
+
 export function mean(values: number[]): number | undefined {
   return values.length ? values.reduce((total, v) => total + v, 0) / values.length : undefined;
 }
