@@ -105,6 +105,6 @@ To use Claude instead: `LLM_PROVIDER=anthropic` plus `ANTHROPIC_API_KEY` (option
 ## Safety notes
 
 - The bot has **no write tools**. Sensitive or irreversible requests produce a draft and pause for a human; even approved drafts are executed by people, not by the bot.
-- Requests for secrets, merges, deploys to production, deletions or permission changes are escalated by a deterministic rule, regardless of the model's routing.
+- Requests to merge, deploy to production, delete or change permissions are escalated by a deterministic rule, regardless of the model's routing; *how-to* questions about those procedures ("¿Cómo despliego a producción?") are answered from the docs instead. Anything about secrets is always escalated.
 - Answers come only from retrieved docs, with citations; otherwise the bot says "No sé" and logs the question.
 - `data/` (index and pending log) and `.env` are gitignored.

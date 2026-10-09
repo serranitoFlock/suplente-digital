@@ -37,6 +37,14 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 
 The router is an LLM classifier with a deterministic safety net (`detectSensitive`): matching requests are forced to `sensitive` even if the model disagrees. Unparseable router output falls back to `question`, which can only answer from docs.
 
+Route boundaries (the router prompt states them as a decision rule plus few-shot examples that deliberately avoid the eval questions):
+
+- Asking **how** to do something, **what** to check, or **whom** to contact → `question`, even when it mentions production, the CDN or an incident.
+- Asking the bot to **look up live data** now (a ticket, failed pipelines) → `task`.
+- Asking the bot to **do** something irreversible or permissioned, or to reveal a secret → `sensitive`.
+
+The safety net mirrors this: action patterns (delete, deploy to production, merge, grant/revoke access, force push) are skipped when the message is framed as a how-to question (`¿Cómo…?`, `¿Cuáles son los pasos para…?`, `¿Qué tengo que hacer para…?`) and contains no imperative (`borrala`, `mergealo`, `desplegá`, `pasame`). Secret-related requests (tokens, passwords, credentials) are always escalated, even as how-to questions.
+
 ## Tools & permissions
 
 | Tool | Args | Access |
