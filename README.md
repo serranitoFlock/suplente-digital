@@ -286,7 +286,7 @@ Para usar Claude en su lugar: `LLM_PROVIDER=anthropic` más `ANTHROPIC_API_KEY` 
 
 ## Adaptarlo a otra persona o equipo
 
-1. **Conocimiento**: reemplazar los archivos de `knowledge/` por los documentos, runbooks y FAQs de esa persona (markdown, un tema por encabezado) y luego ejecutar `npm run ingest`. Si esa persona usa Engram, agregar sus proyectos a `config/engram-sources.local.json` y ejecutar `npm run engram:export` antes (ver [Conocimiento desde Engram](#conocimiento-desde-engram)).
+1. **Conocimiento**: reemplazar los archivos de `knowledge/` por los documentos, runbooks y FAQs de esa persona (markdown, un tema por encabezado) y luego ejecutar `npm run ingest`. Adaptar también `knowledge/glosario.md` (abreviaturas y sinónimos informales del equipo, como "wc" o "MR"): ayuda a entender preguntas escritas a las apuradas; el prompt además interpreta errores de tipeo sin repetirlos. Si esa persona usa Engram, agregar sus proyectos a `config/engram-sources.local.json` y ejecutar `npm run engram:export` antes (ver [Conocimiento desde Engram](#conocimiento-desde-engram)).
 2. **Prompts**: ajustar las líneas de la persona del bot en `src/graph/router.ts` (`ROUTER_PROMPT`) y los prompts de los demás nodos.
 3. **Herramientas**: implementar `ToolProvider` (`src/tools/types.ts`) para los sistemas propios, o apuntar `MCP_SERVER_COMMAND` / `MCP_TOOL_*` a un servidor MCP que exponga herramientas equivalentes de solo lectura.
 4. **Red de seguridad**: ampliar `ACTION_PATTERNS` / `SECRET_PATTERNS` en `src/graph/router.ts` con las acciones irreversibles de ese dominio.

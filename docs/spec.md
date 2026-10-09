@@ -15,7 +15,7 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 ## Scope
 
 - Spanish-language chat (CLI for the MVP) with instant acknowledgement and background processing.
-- Knowledge base: markdown files in `knowledge/`, chunked by heading and embedded locally.
+- Knowledge base: markdown files in `knowledge/`, chunked by heading and embedded locally. `knowledge/glosario.md` maps informal abbreviations and synonyms (wc, MR, lib, main/master, "no carga"...) to their meaning; it is kept to one chunk so it never takes more than one doc slot. The answer prompt reads typos and informal phrasing by meaning and never echoes the user's typos.
 - Second knowledge source: the owner's Engram memory (allowlisted projects, filtered notes), see "Engram knowledge source".
 - Read-only tools: ticket lookup, ticket search, failed pipelines.
 - Human-in-the-loop approval for sensitive requests.
