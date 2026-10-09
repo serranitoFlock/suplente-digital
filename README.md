@@ -35,7 +35,7 @@ hours saved per week = Q × R × M / 60
 plus Q × R = 15 fewer interruptions per week for the human backup.
 ```
 
-El costo del modelo está medido, no supuesto: en el conjunto de evaluación, cada pedido usó en promedio **1306 tokens de entrada + 129 de salida** (Bonsai 27B, local, por lo que el costo es 0). Con un modelo alojado, el costo por pedido ≈ `1306 / 1e6 × input_price + 129 / 1e6 × output_price` (USD por millón de tokens; configurar `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` y el bot lo informa por pedido).
+El costo del modelo está medido, no supuesto: en el conjunto de evaluación, cada pedido que llama al modelo usó en promedio **1463 tokens de entrada + 133 de salida** (Bonsai 27B, local, por lo que el costo es 0). Con un modelo alojado, el costo por pedido ≈ `1463 / 1e6 × input_price + 133 / 1e6 × output_price` (USD por millón de tokens; configurar `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` y el bot lo informa por pedido).
 
 **Camino de adopción.**
 
@@ -46,7 +46,7 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 
 **Limitaciones.**
 
-- La estimación anterior es ilustrativa; la tasa real de resolución depende de qué tan buenos y actualizados estén los documentos. El conjunto de evaluación (17 casos) mide la calidad de las respuestas, no la adopción.
+- La estimación anterior es ilustrativa; la tasa real de resolución depende de qué tan buenos y actualizados estén los documentos. El conjunto de evaluación (20 casos) mide la calidad de las respuestas, no la adopción.
 - Solo cubre las preguntas que los documentos responden y tres consultas de solo lectura; cualquier otra cosa se convierte en un pendiente, no en una respuesta.
 - Un modelo local de 27B tarda ~10 s por pedido (p50 en el conjunto de evaluación); eso es aceptable con acuse de recibo inmediato, pero no para un intercambio conversacional ágil.
 - Por ahora solo CLI: sin autenticación, sin permisos por usuario, cola en memoria.
@@ -66,20 +66,21 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 
 ## Resultados de la evaluación
 
-`npm run eval` con PrismML Bonsai 27B (1-bit, `llama-server` local), 17 casos, ejecutado el 2026-10-09:
+`npm run eval` con PrismML Bonsai 27B (1-bit, `llama-server` local), 20 casos, ejecutado el 2026-10-09:
 
 | Métrica | Resultado |
 |--------|--------|
 | Recall@1 / recall@4 / MRR de recuperación (8 casos con `expectedSources`) | 88% / 100% / 0.917 |
-| Precisión de ruteo | 100% (17/17) |
-| Tasa de aciertos de hechos | 100% |
+| Precisión de ruteo | 100% (20/20) |
+| Tasa de aciertos de hechos | 96% (`cdn-not-loading` 1/2) |
 | "No sé" correcto | 100% |
 | Inyecciones resistidas (3 casos adversariales) | 100% (3/3) |
-| Latencia por caso | p50 10.4 s · p95 17.4 s |
-| Tokens por caso | 1306 de entrada · 129 de salida (uso informado en 17/17) |
+| Seguimiento / aclaración (2 casos multi-turno) | 100% (2/2) |
+| Latencia por caso | p50 11.0 s · p95 20.1 s |
+| Tokens por caso | 1463 de entrada · 133 de salida (uso informado en 16/20: los 4 casos determinísticos —rechazos, aclaración y capacidades— no llaman al modelo) |
 | Costo estimado | US$ 0 (modelo local) |
 
-Conjunto pequeño, una sola ejecución, temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. Una ejecución anterior de los 14 casos originales tuvo un "no sé" inestable (`unknown-charts`).
+Conjunto pequeño, una sola ejecución, temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. Una ejecución anterior de los 14 casos originales tuvo un "no sé" inestable (`unknown-charts`). La ejecución anterior de 17 casos dio 100% de aciertos de hechos; la diferencia actual es `cdn-not-loading` (el documento esperado no queda primero en la recuperación).
 
 ## Arquitectura
 
