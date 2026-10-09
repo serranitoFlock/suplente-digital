@@ -94,9 +94,15 @@ describe("selectContext — sibling expansion (small-to-big)", () => {
   // a.md has five sections; only #2 passes minScore. b.md is the next curated doc.
   const aDoc = [doc("a.md", 2, 0.95), doc("a.md", 0, 0.5), doc("a.md", 1, 0.4), doc("a.md", 3, 0.3), doc("a.md", 4, 0.2)];
 
-  it("adds the best curated doc's other sections in document order, keeping one slot for the next curated doc", () => {
+  it("adds the best curated doc's other sections in document order; the next curated doc competes for the last slot", () => {
     const ranked = byScore([...aDoc, doc("b.md", 0, 0.9), note(1, 0.93)]);
     expect(ids(selectContext(ranked, base))).toEqual(["a.md#0", "a.md#1", "a.md#2", "b.md#0", note(1, 0).id]);
+  });
+
+  it("gives the last doc slot to the best doc's next section when it outscores the next doc (regression)", () => {
+    // Real-index shape: the troubleshooting doc's "check the console" section (0.873) lost its slot to an unrelated doc (0.869).
+    const ranked = byScore([doc("a.md", 0, 0.897), doc("a.md", 5, 0.889), doc("a.md", 4, 0.876), doc("a.md", 1, 0.873), doc("b.md", 3, 0.869)]);
+    expect(ids(selectContext(ranked, base))).toEqual(["a.md#0", "a.md#1", "a.md#4", "a.md#5"]);
   });
 
   it("lets the best doc take every doc slot when no other curated doc passes", () => {

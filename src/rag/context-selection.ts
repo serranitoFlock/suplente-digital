@@ -46,8 +46,9 @@ export function chunkPosition(chunk: Pick<Chunk, "id">): number {
  * Sibling expansion (small-to-big): the best curated doc also brings its other sections, even below
  * `minScore`, best first, and they are shown in document order. A short how-to split by headings
  * (e.g. a troubleshooting checklist) then reaches the model whole instead of as one isolated step.
- * One doc slot stays for the best chunk of the next curated doc when there is one, so a question
- * whose answer sits in the second-ranked doc keeps it. Engram notes are never expanded.
+ * When another curated doc passes, the last doc slot is decided by score between the best doc's next
+ * section and the other docs' chunks, so a question answered by the second-ranked doc can keep it.
+ * Engram notes are never expanded.
  */
 export function selectContext(ranked: ScoredChunk[], options: ContextOptions): ScoredChunk[] {
   const { minScore, candidates = DEFAULT_CONTEXT.candidates, docSlots = DEFAULT_CONTEXT.docSlots, engramSlots = DEFAULT_CONTEXT.engramSlots } = options;
@@ -73,14 +74,24 @@ function expandBestDoc(ranked: ScoredChunk[], pool: ScoredChunk[], curated: Scor
 
   const own = curated.filter((chunk) => chunk.source === best).slice(0, ownSlots);
   let chars = length(notes) + length(own) + length(others.slice(0, 1));
-  for (const sibling of ranked) {
+  const fits = (chunk: ScoredChunk) => inPool.has(chunk.id) || chars + chunk.text.length <= maxContextChars;
+  const siblings = ranked.filter((chunk) => chunk.source === best && !own.includes(chunk));
+  for (const sibling of siblings) {
     if (own.length >= ownSlots) break;
-    if (sibling.source !== best || inPool.has(sibling.id) || chars + sibling.text.length > maxContextChars) continue;
+    if (!fits(sibling)) continue;
     own.push(sibling);
     chars += sibling.text.length;
   }
-  own.sort((a, b) => chunkPosition(a) - chunkPosition(b));
-  return [...own, ...others.slice(0, docSlots - own.length)];
+  // Remaining slots (at least the reserved one): the best doc's next sections and the other docs compete by score.
+  const rest: ScoredChunk[] = [];
+  for (const chunk of [...siblings.filter((s) => !own.includes(s)), ...others].sort((a, b) => b.score - a.score)) {
+    if (own.length + rest.length >= docSlots) break;
+    if (chunk.source === best && !fits(chunk)) continue;
+    rest.push(chunk);
+    if (chunk.source === best) chars += chunk.text.length;
+  }
+  const fromBest = [...own, ...rest.filter((chunk) => chunk.source === best)].sort((a, b) => chunkPosition(a) - chunkPosition(b));
+  return [...fromBest, ...rest.filter((chunk) => chunk.source !== best)];
 }
 
 /** Non-negative integer from an environment variable (`RETRIEVAL_DOC_SLOTS`, `RETRIEVAL_ENGRAM_SLOTS`). */
