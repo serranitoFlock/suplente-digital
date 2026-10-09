@@ -12,7 +12,7 @@ import type { ScoredChunk } from "./retriever.js";
 export interface ContextOptions {
   /** Cosine cut-off: chunks below it are never candidates. */
   minScore: number;
-  /** Candidates considered after the `minScore` cut, best first (default 20). */
+  /** Candidates per source considered after the `minScore` cut, best first (default 20). */
   candidates?: number;
   /** Maximum chunks from curated docs (default 4). */
   docSlots?: number;
@@ -51,9 +51,11 @@ export function chunkPosition(chunk: Pick<Chunk, "id">): number {
  */
 export function selectContext(ranked: ScoredChunk[], options: ContextOptions): ScoredChunk[] {
   const { minScore, candidates = DEFAULT_CONTEXT.candidates, docSlots = DEFAULT_CONTEXT.docSlots, engramSlots = DEFAULT_CONTEXT.engramSlots } = options;
-  const pool = ranked.filter((chunk) => chunk.score >= minScore).slice(0, candidates);
-  const curated = pool.filter((chunk) => !isEngramSource(chunk.source));
-  const engram = pool.filter((chunk) => isEngramSource(chunk.source));
+  // One pool per source: a shared top-N would let hundreds of near-tied notes push every curated chunk out.
+  const passing = ranked.filter((chunk) => chunk.score >= minScore);
+  const curated = passing.filter((chunk) => !isEngramSource(chunk.source)).slice(0, candidates);
+  const engram = passing.filter((chunk) => isEngramSource(chunk.source)).slice(0, candidates);
+  const pool = [...curated, ...engram];
   if (curated.length === 0) return engram.slice(0, docSlots + engramSlots);
   const notes = engram.slice(0, engramSlots);
   const docs = options.expandSiblings === false ? curated.slice(0, docSlots) : expandBestDoc(ranked, pool, curated, notes, { ...options, docSlots });

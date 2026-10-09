@@ -59,10 +59,16 @@ describe("selectContext — source balance", () => {
     expect(context.every((c) => isEngramSource(c.source))).toBe(true);
   });
 
-  it("applies minScore and the candidate pool, and returns nothing when no chunk passes", () => {
-    const ranked = byScore([note(1, 0.99), note(2, 0.98), doc("a.md", 0, 0.97), doc("b.md", 0, 0.5)]);
-    expect(ids(selectContext(ranked, { ...base, candidates: 2 }))).toEqual(ids([note(1, 0), note(2, 0)]));
+  it("applies minScore and a candidate pool per source, and returns nothing when no chunk passes", () => {
+    const ranked = byScore([note(1, 0.99), note(2, 0.98), note(3, 0.975), doc("a.md", 0, 0.97), doc("c.md", 0, 0.96), doc("b.md", 0, 0.5)]);
+    expect(ids(selectContext(ranked, { ...base, candidates: 1 }))).toEqual(["a.md#0", note(1, 0).id]);
     expect(selectContext(ranked, { ...base, minScore: 0.999 })).toEqual([]);
+  });
+
+  it("finds curated chunks ranked below many Engram notes (each source has its own pool)", () => {
+    const notes = Array.from({ length: 30 }, (_, i) => note(i, 0.9 - i * 0.001));
+    const ranked = byScore([...notes, doc("a.md", 0, 0.83)]);
+    expect(selectContext(ranked, base).map((c) => c.source)[0]).toBe("a.md");
   });
 
   it("orders each group by score", () => {
