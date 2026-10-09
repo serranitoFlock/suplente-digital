@@ -20,6 +20,12 @@ export interface ContextOptions {
   engramSlots?: number;
   /** Small-to-big: fill doc slots with the other sections of the best curated doc (default true). */
   expandSiblings?: boolean;
+  /**
+   * Relative cut-off: candidates more than this below the best chunk are dropped (default: none). With
+   * compressed E5 scores, a gap of 0.05 separates a clear winner from the crowd, so a note that clearly
+   * answers is not buried under weakly related docs. Sibling expansion is exempt.
+   */
+  maxScoreGap?: number;
   /** Sections added by the expansion never push the context past this many characters (default 6000, ~1.5k tokens). */
   maxContextChars?: number;
 }
@@ -53,7 +59,8 @@ export function chunkPosition(chunk: Pick<Chunk, "id">): number {
 export function selectContext(ranked: ScoredChunk[], options: ContextOptions): ScoredChunk[] {
   const { minScore, candidates = DEFAULT_CONTEXT.candidates, docSlots = DEFAULT_CONTEXT.docSlots, engramSlots = DEFAULT_CONTEXT.engramSlots } = options;
   // One pool per source: a shared top-N would let hundreds of near-tied notes push every curated chunk out.
-  const passing = ranked.filter((chunk) => chunk.score >= minScore);
+  const floor = Math.max(minScore, (ranked[0]?.score ?? 0) - (options.maxScoreGap ?? Number.POSITIVE_INFINITY));
+  const passing = ranked.filter((chunk) => chunk.score >= floor);
   const curated = passing.filter((chunk) => !isEngramSource(chunk.source)).slice(0, candidates);
   const engram = passing.filter((chunk) => isEngramSource(chunk.source)).slice(0, candidates);
   const pool = [...curated, ...engram];

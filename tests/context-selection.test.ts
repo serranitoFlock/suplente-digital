@@ -127,3 +127,17 @@ describe("selectContext — sibling expansion (small-to-big)", () => {
     expect(ids(selectContext(byScore(aDoc), { ...base, expandSiblings: false }))).toEqual(["a.md#2"]);
   });
 });
+
+describe("selectContext — relative cut-off", () => {
+  it("drops candidates more than maxScoreGap below the best chunk, so a clear Engram winner is not buried under weak docs", () => {
+    const ranked = byScore([note(1, 0.935), note(2, 0.847), doc("a.md", 0, 0.831), doc("b.md", 0, 0.827)]);
+    expect(ids(selectContext(ranked, { ...base, maxScoreGap: 0.05 }))).toEqual([note(1, 0).id]);
+    expect(selectContext(ranked, base)).toHaveLength(4);
+  });
+
+  it("keeps near-tied sources and still expands the best doc below the gap", () => {
+    const ranked = byScore([doc("a.md", 0, 0.897), note(1, 0.895), note(2, 0.893), doc("a.md", 1, 0.5)]);
+    expect(ids(selectContext(ranked, { ...base, maxScoreGap: 0.05 }))).toEqual(["a.md#0", "a.md#1", note(1, 0).id, note(2, 0).id]);
+  });
+});
+
