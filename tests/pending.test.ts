@@ -14,6 +14,12 @@ describe("PendingStore", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it("keeps every entry when appends run concurrently", async () => {
+    const store = new PendingStore(join(dir, "pending.json"));
+    await Promise.all(Array.from({ length: 8 }, (_, i) => store.append({ question: `¿Q${i}?`, topic: "cdn", reason: "unknown" })));
+    expect(await store.list()).toHaveLength(8);
+  });
+
   it("returns an empty list when the file does not exist", async () => {
     expect(await new PendingStore(join(dir, "missing.json")).list()).toEqual([]);
   });

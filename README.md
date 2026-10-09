@@ -8,11 +8,13 @@ This instance is configured as the **Frontend Architecture backup** for a fictio
 
 ## Architecture
 
-An orchestrator (LangGraph.js) routes each request to RAG, read-only tools (designed to be backed by MCP servers), or human-in-the-loop review.
+An `AssistantService` acknowledges each request instantly and runs it in a background queue; an orchestrator (LangGraph.js) then routes it to RAG, read-only tools (designed to be backed by MCP servers), or human-in-the-loop review.
 
 ```mermaid
 flowchart LR
-    U([User]) --> R{Router<br/>LLM + safety rules}
+    U([User]) --> SV[AssistantService<br/>instant ack + job queue]
+    SV -. "events: done / needs_approval / failed" .-> U
+    SV --> R{Router<br/>LLM + safety rules}
     R -- question --> A[RAG answer<br/>local embeddings + citations]
     R -- task --> T[Task node<br/>read-only tools]
     R -- sensitive --> D[Draft reply] --> H{{interrupt:<br/>human backup}}
@@ -28,6 +30,7 @@ flowchart LR
 
 | Piece | Where | Notes |
 |-------|-------|-------|
+| Service | `src/service/*` | `submit()` → instant deterministic ack; in-process queue (`ASSISTANT_CONCURRENCY`, default 1); typed events; `approve` / `reject` / `status` / `list` |
 | Orchestrator | `src/graph/graph.ts` | `StateGraph` + `MemorySaver` checkpointer |
 | Router | `src/graph/router.ts` | JSON classification validated with zod + deterministic `detectSensitive` |
 | RAG | `src/rag/*`, `src/graph/answer.ts` | Heading-aware chunking, `Xenova/multilingual-e5-small` via `@huggingface/transformers` (no API key), cosine over `data/index.json` |
@@ -64,14 +67,49 @@ Example session:
 
 ```text
 vos> ¿Qué reviso si acme-header no carga desde el CDN?
-suplente [question]> Primero mirá la consola: un 404 sobre bundle.js indica ... [1]
+suplente> Recibido 👀 (consulta #1). Lo estoy revisando y te respondo en cuanto lo tenga.
+vos> Mergeá el MR de acme-card a main
+suplente> Recibido 👀 (consulta #2). Parece un pedido que necesita aprobación del backup humano: preparo un borrador y te aviso. Hay 1 consulta antes que la tuya.
+
+suplente [#1 · question]> Primero mirá la consola: un 404 sobre bundle.js indica ... [1]
 Fuentes:
 [1] troubleshooting-componente-no-carga.md › Troubleshooting: el componente no carga > 1. Revisar la consola del navegador
 
-vos> Mergeá el MR de acme-card a main
-[Pedido sensible: requiere aprobación del backup humano]
-backup> ¿Aprobar la respuesta propuesta? (s/n)
+[#2] Pedido sensible: requiere aprobación del backup humano. El bot no ejecuta la acción.
+Borrador: ...
+→ /aprobar 2 [nota]  o  /rechazar 2 [nota]
 ```
+
+## Instant acknowledgement
+
+A local model takes ~25 s per answer, so nobody waits on a blank screen. `AssistantService.submit(text, { requester })` returns right away with a deterministic acknowledgement (no model call; keyword hints only), then runs the graph in a background queue:
+
+```text
+vos> ¿Cómo publico una versión nueva de @acme/ui-kit?
+suplente> Recibido 👀 (consulta #3). Lo estoy revisando y te respondo en cuanto lo tenga.
+vos> /estado
+#3 [procesando] ¿Cómo publico una versión nueva de @acme/ui-kit?
+
+suplente [#3 · question]> Seguí estos pasos: ... [1]
+```
+
+The service emits typed events; transports only decide how to deliver them:
+
+| Event | Payload | Typical delivery |
+|-------|---------|------------------|
+| `done` | `id`, `requester`, `route`, `answer` | Follow-up reply to the requester |
+| `needs_approval` | `id`, `requester`, `draft` | Card to the human backup with approve / reject buttons |
+| `failed` | `id`, `requester`, friendly `message`, technical `error` | Friendly reply; `error` goes to logs only |
+
+A Teams (or Slack) adapter would plug in like this:
+
+1. On an incoming message, call `submit(text, { requester })`, reply with `ack` in the same turn, and store the conversation reference keyed by the returned `id`.
+2. Subscribe to `done` / `failed` and send the result as a **proactive message** to that stored conversation reference.
+3. Send `needs_approval` to the backup's channel as an adaptive card; its buttons call `approve(id, note)` / `reject(id, note)`. The bot still never executes the action.
+
+For production, swap the in-process queue and `MemorySaver` for durable ones (see T3 in the task list) so jobs survive restarts.
+
+CLI commands: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/ayuda`, `/salir`. Results print tagged with their number and the prompt is redrawn, so you can keep typing while earlier questions run. On `/salir` or end of input the CLI waits for running jobs; jobs still awaiting approval are reported and nothing is executed.
 
 ## Run with a local model
 

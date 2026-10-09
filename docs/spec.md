@@ -14,7 +14,7 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 
 ## Scope
 
-- Spanish-language chat (CLI for the MVP).
+- Spanish-language chat (CLI for the MVP) with instant acknowledgement and background processing.
 - Knowledge base: markdown files in `knowledge/`, chunked by heading and embedded locally.
 - Read-only tools: ticket lookup, ticket search, failed pipelines.
 - Human-in-the-loop approval for sensitive requests.
@@ -25,6 +25,16 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 - Executing any write action (merge, deploy, delete, approve, permission changes).
 - Handling secrets or credentials.
 - Web/Teams UI, real MCP wiring and authentication (planned, see `odd/tasks/suplente-digital.md`).
+
+## Request lifecycle (instant acknowledgement)
+
+1. `AssistantService.submit(text, { requester })` returns `{ id, ack }` immediately. The ack is deterministic (no model call): "Recibido 👀 (consulta #N). …", with a cheap keyword hint (sensitive / live lookup / general) and how many requests are ahead in the queue.
+2. The job runs the graph in an in-process queue (`ASSISTANT_CONCURRENCY`, default 1). Job states: `queued` → `running` → `done` | `needs_approval` | `failed`.
+3. The service emits `done` (answer), `needs_approval` (draft for the human backup) or `failed` (friendly Spanish message; technical detail kept separately). Transports (CLI today, Teams/Slack later) deliver these as follow-up messages.
+4. `approve(id, note?)` / `reject(id, note?)` resume a paused job exactly once; a second decision returns `not_pending`. `status(id)` and `list()` expose job state.
+5. The pending log serializes writes so concurrent jobs never drop entries.
+
+`npm run eval` still calls the graph directly (sequentially), so eval numbers are unaffected by the queue.
 
 ## Routes
 
@@ -71,7 +81,8 @@ Providers implement `ToolProvider`. `MockToolProvider` (fixtures) is the default
 - [x] Sensitive requests pause the graph until a human decision and record it.
 - [x] `npm run summary` groups pending entries by topic and suggests docs to write.
 - [x] Everything runs without credentials except the LLM calls (mock tools, local embeddings).
-- [x] Unit tests cover chunking, ranking, router parsing, safety net, pending store/summary, tools and graph flows with a fake LLM.
+- [x] Every request gets an instant acknowledgement (no model call); results, approval requests and failures arrive later as events tagged with the request number.
+- [x] Unit tests cover chunking, ranking, router parsing, safety net, pending store/summary, tools, graph flows and the assistant service (ack, queue limit, done / failed / approval flows) with a fake LLM or fake graph.
 
 ## Eval plan
 

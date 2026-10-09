@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { resolve } from "node:path";
 import { resolveLlmSettings, type LlmSettings } from "./llm.js";
+import { resolveConcurrency } from "./service/assistant-service.js";
 
 const root = process.cwd();
 const env = (name: string): string | undefined => process.env[name]?.trim() || undefined;
@@ -12,6 +13,8 @@ export const config = {
   embeddingModel: env("EMBEDDING_MODEL") ?? "Xenova/multilingual-e5-small",
   transformersCacheDir: resolve(root, env("TRANSFORMERS_CACHE_DIR") ?? ".cache/transformers"),
   retrieval: { topK: 4, minScore: 0.82 },
+  /** Background graph runs at once (`ASSISTANT_CONCURRENCY`, default 1). */
+  assistant: { concurrency: resolveConcurrency(process.env.ASSISTANT_CONCURRENCY) },
   mcp: {
     command: env("MCP_SERVER_COMMAND"),
     args: env("MCP_SERVER_ARGS")?.split(/\s+/) ?? [],

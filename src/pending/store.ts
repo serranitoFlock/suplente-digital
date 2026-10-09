@@ -21,6 +21,9 @@ export type NewPendingEntry = Omit<PendingEntry, "id" | "createdAt">;
 
 /** Append-only JSON log of questions the bot could not resolve on its own. */
 export class PendingStore {
+  /** Serializes appends: concurrent background jobs would otherwise overwrite each other's read-modify-write. */
+  #writes: Promise<unknown> = Promise.resolve();
+
   constructor(readonly path: string) {}
 
   async list(): Promise<PendingEntry[]> {
@@ -32,7 +35,13 @@ export class PendingStore {
     }
   }
 
-  async append(entry: NewPendingEntry): Promise<PendingEntry> {
+  append(entry: NewPendingEntry): Promise<PendingEntry> {
+    const write = this.#writes.then(() => this.#append(entry));
+    this.#writes = write.catch(() => undefined);
+    return write;
+  }
+
+  async #append(entry: NewPendingEntry): Promise<PendingEntry> {
     const saved: PendingEntry = { id: randomUUID(), createdAt: new Date().toISOString(), ...entry };
     const entries = await this.list();
     entries.push(saved);
