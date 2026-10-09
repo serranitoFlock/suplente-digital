@@ -66,24 +66,25 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 
 ## Resultados de la evaluación
 
-`npm run eval` con PrismML Bonsai 27B (1-bit, `llama-server` local), 24 casos, ejecutado el 2026-10-09 con un índice reproducible (`ENGRAM_REAL=false`: `knowledge/*.md` + la muestra ficticia de Engram):
+`npm run eval` con PrismML Bonsai 27B (1-bit, `llama-server` local), 26 casos, ejecutado el 2026-10-09 con un índice reproducible (`ENGRAM_REAL=false`: `knowledge/*.md` + la muestra ficticia de Engram):
 
 | Métrica | Resultado |
 |--------|--------|
-| Recall@1 / recall@4 / MRR de recuperación (12 casos con `expectedSources`) | 92% / 100% / 0.944 (los 8 casos anteriores, sin cambios: 88% / 100% / 0.917) |
-| Precisión de ruteo | 100% (24/24) |
+| Recall@1 / recall@4 / MRR de recuperación (14 casos con `expectedSources`) | 86% / 100% / 0.917 |
+| Context share (fragmentos enviados al modelo que vienen de la fuente esperada) | 78% |
+| Precisión de ruteo | 100% (26/26) |
 | Tasa de aciertos de hechos | 94% (`cdn-not-loading` 1/2, `engram-safari-styles` 1/2) |
 | "No sé" correcto | 100% |
 | Inyecciones resistidas (3 casos adversariales) | 100% (3/3) |
 | Notas de Engram filtradas sin usar (1 caso) | 100% (1/1) |
 | Seguimiento / aclaración (2 casos multi-turno) | 100% (2/2) |
-| Latencia por caso | p50 7.8 s · p95 20.5 s |
-| Tokens por caso | 1523 de entrada · 130 de salida (uso informado en 20/24: los 4 casos determinísticos —rechazos, aclaración y capacidades— no llaman al modelo) |
+| Latencia por caso | p50 10.2 s · p95 18.1 s |
+| Tokens por caso | 1622 de entrada · 118 de salida (uso informado en 22/26: los 4 casos determinísticos —rechazos, aclaración y capacidades— no llaman al modelo) |
 | Costo estimado | US$ 0 (modelo local) |
 
-Conjunto pequeño, una sola ejecución, temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. `cdn-not-loading` ya fallaba en la ejecución anterior (el documento esperado no queda primero en la recuperación); en `engram-safari-styles` la respuesta fue correcta pero omitió la versión (en otra ejecución dio 2/2). La ejecución anterior de 20 casos, sin Engram, dio ruteo 100%, hechos 96% y "no sé" 100%.
+Conjunto pequeño, una sola ejecución, temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. `cdn-not-loading` ya fallaba antes (el documento esperado no queda primero en la recuperación); en `engram-safari-styles` la respuesta fue correcta pero omitió la versión. Los 2 casos nuevos usan frases informales ("no me andan los wc") y aciertan 2/2 y 1/1.
 
-Con las notas reales de Engram en el índice (solo en la máquina local, no reproducible) la recuperación y el ruteo no cambian, pero `unknown-charts` deja de responder "no sé": las notas reales sí hablan del tema, y la expectativa del caso supone la base de conocimiento ficticia. Por eso las evaluaciones se corren con `ENGRAM_REAL=false` (ver [Conocimiento desde Engram](#conocimiento-desde-engram)).
+Con las notas reales de Engram en el índice (solo en la máquina local, no reproducible, ~1.100 fragmentos más) el ruteo queda en 100%, los hechos en 97%, el "no sé" en 100% y el context share en 68%. Antes del balance de fuentes, con esas notas, un top-4 simple dejaba un solo fragmento del documento correcto y el resto eran notas: el bot respondía "No sé" a "no me están cargando los web component". Las evaluaciones reproducibles se corren con `ENGRAM_REAL=false` (ver [Conocimiento desde Engram](#conocimiento-desde-engram)).
 
 ## Arquitectura
 
