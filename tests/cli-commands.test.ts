@@ -20,6 +20,7 @@ describe("parseCommand", () => {
     expect(parseCommand("/pendientes")).toEqual({ kind: "pending" });
     expect(parseCommand("/salir")).toEqual({ kind: "quit" });
     expect(parseCommand("/ayuda")).toEqual({ kind: "help" });
+    expect(parseCommand("/stats")).toEqual({ kind: "stats" });
     expect(parseCommand("/foo").kind).toBe("invalid");
   });
 });

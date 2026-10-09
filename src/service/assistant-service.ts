@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { askAgent, resumeAgent, type AgentGraph, type AgentTurn } from "../graph/graph.js";
+import { askAgent, resumeAgent, tracedTurn, type AgentGraph, type AgentTurn } from "../graph/graph.js";
+import type { Tracer } from "../observability/tracing.js";
 import { detectSensitive } from "../graph/router.js";
 import type { ReviewDecision, Route } from "../graph/state.js";
 import { JobQueue } from "./job-queue.js";
@@ -17,10 +18,11 @@ export interface AgentRunner {
   resume(decision: ReviewDecision, threadId: string): Promise<AgentTurn>;
 }
 
-export function graphRunner(graph: AgentGraph): AgentRunner {
+/** Adapts the graph to the service; with a tracer, every ask/resume becomes one trace. */
+export function graphRunner(graph: AgentGraph, tracer?: Tracer): AgentRunner {
   return {
-    ask: (question, threadId) => askAgent(graph, question, threadId),
-    resume: (decision, threadId) => resumeAgent(graph, decision, threadId),
+    ask: (question, threadId) => tracedTurn(tracer, threadId, "ask", () => askAgent(graph, question, threadId)),
+    resume: (decision, threadId) => tracedTurn(tracer, threadId, "resume", () => resumeAgent(graph, decision, threadId)),
   };
 }
 

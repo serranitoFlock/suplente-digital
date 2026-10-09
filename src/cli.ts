@@ -1,8 +1,10 @@
 import { clearLine, createInterface, cursorTo } from "node:readline";
 import { HELP_TEXT, parseCommand, renderJobs } from "./cli-commands.js";
-import { config, loadLlmSettings } from "./config.js";
+import { config, loadCostRates, loadLlmSettings } from "./config.js";
 import { buildGraph } from "./graph/graph.js";
 import { createLlm, describeLlm } from "./llm.js";
+import { computeStats, renderStats } from "./observability/stats.js";
+import { JsonlTraceExporter, Tracer } from "./observability/tracing.js";
 import { PendingStore } from "./pending/store.js";
 import { renderWelcomeBack } from "./pending/summary.js";
 import { LocalE5Embedder } from "./rag/embeddings.js";
@@ -12,6 +14,7 @@ import { createToolProvider } from "./tools/mcp-provider.js";
 
 async function main(): Promise<void> {
   const llmSettings = loadLlmSettings();
+  const tracer = new Tracer({ exporters: [new JsonlTraceExporter(config.tracesPath)], costRates: loadCostRates() });
 
   const pending = new PendingStore(config.pendingPath);
   const tools = await createToolProvider(config.mcp);
@@ -27,7 +30,7 @@ async function main(): Promise<void> {
     pending,
     allowedLinkHosts: config.security.allowedLinkHosts,
   });
-  const service = new AssistantService(graphRunner(graph), { concurrency: config.assistant.concurrency, threadPrefix: `cli-${Date.now()}` });
+  const service = new AssistantService(graphRunner(graph, tracer), { concurrency: config.assistant.concurrency, threadPrefix: `cli-${Date.now()}` });
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "vos> " });
   let closing = false;
 
@@ -77,6 +80,9 @@ async function main(): Promise<void> {
       case "pending":
         void pending.list().then((entries) => print(`${renderWelcomeBack(entries)}\n`));
         return;
+      case "stats":
+        print(renderStats(computeStats(tracer.summaries)));
+        return;
       case "help":
         print(HELP_TEXT);
         return;
@@ -102,6 +108,7 @@ async function main(): Promise<void> {
         print(`Quedaron ${awaiting.length} pedido(s) sin decisión (${awaiting.map((j) => `#${j.id}`).join(", ")}); no se ejecutó nada.`);
       }
       await tools.close?.();
+      await tracer.flush();
     })().catch((error: unknown) => {
       console.error(error instanceof Error ? error.message : error);
       process.exitCode = 1;

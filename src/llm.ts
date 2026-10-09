@@ -1,6 +1,7 @@
 import { ChatAnthropic } from "@langchain/anthropic";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
+import { withSpan, type Attributes } from "./observability/tracing.js";
 
 /** Minimal text-in/text-out contract so graph nodes can be tested with a fake model. */
 export type Llm = (system: string, user: string) => Promise<string>;
@@ -63,16 +64,63 @@ export function describeLlm(settings: LlmSettings): string {
   return settings.provider === "anthropic" ? `anthropic ${settings.model}` : `${settings.model} @ ${settings.baseUrl}`;
 }
 
+/** One model reply plus token usage when the provider reports it. */
+export interface LlmCallResult {
+  text: string;
+  usage?: { inputTokens: number; outputTokens: number };
+}
+
+export interface LlmTraceMeta {
+  /** `gen_ai.provider.name` (e.g. "anthropic", or "openai-compatible" for local OpenAI-style servers). */
+  provider: string;
+  model: string;
+  serverAddress?: string;
+}
+
+/**
+ * Wraps a model call in an OTel GenAI `chat` span (operation, provider, model, token usage).
+ * Usage is read from LangChain's `usage_metadata`; when a server does not report it the
+ * attributes are simply absent and the trace marks token totals as incomplete.
+ */
+export function tracedLlm(meta: LlmTraceMeta, call: (system: string, user: string) => Promise<LlmCallResult>): Llm {
+  const attributes: Attributes = {
+    "gen_ai.operation.name": "chat",
+    "gen_ai.provider.name": meta.provider,
+    "gen_ai.request.model": meta.model,
+    ...(meta.serverAddress ? { "server.address": meta.serverAddress } : {}),
+  };
+  return (system, user) =>
+    withSpan(`chat ${meta.model}`, attributes, async (span) => {
+      const { text, usage } = await call(system, user);
+      if (usage) span.setAttributes({ "gen_ai.usage.input_tokens": usage.inputTokens, "gen_ai.usage.output_tokens": usage.outputTokens });
+      return text;
+    });
+}
+
+/** Token usage from a LangChain AIMessage, if the provider reported it. */
+function usageOf(message: { usage_metadata?: { input_tokens: number; output_tokens: number } }): LlmCallResult["usage"] {
+  const usage = message.usage_metadata;
+  return usage ? { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } : undefined;
+}
+
+function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createLlm(settings: LlmSettings): Llm {
   return settings.provider === "anthropic" ? createClaudeLlm(settings.model) : createOpenAiCompatibleLlm(settings);
 }
 
 export function createClaudeLlm(model: string): Llm {
   const chat = new ChatAnthropic({ model, maxTokens: 4096, outputConfig: { effort: "low" } });
-  return async (system, user) => {
+  return tracedLlm({ provider: "anthropic", model }, async (system, user) => {
     const response = await chat.invoke([new SystemMessage(system), new HumanMessage(user)]);
-    return response.text;
-  };
+    return { text: response.text, usage: usageOf(response) };
+  });
 }
 
 function createOpenAiCompatibleLlm(settings: Extract<LlmSettings, { provider: "openai-compatible" }>): Llm {
@@ -87,14 +135,15 @@ function createOpenAiCompatibleLlm(settings: Extract<LlmSettings, { provider: "o
     // Hint for Qwen3-style chat templates (llama.cpp honors it; servers that do not know it ignore it).
     modelKwargs: settings.disableThinking ? { chat_template_kwargs: { enable_thinking: false } } : undefined,
   });
-  return async (system, user) => {
+  const meta = { provider: "openai-compatible", model: settings.model, serverAddress: hostOf(settings.baseUrl) };
+  return tracedLlm(meta, async (system, user) => {
     try {
       const response = await chat.invoke([new SystemMessage(system), new HumanMessage(user)]);
-      return stripThinking(response.text);
+      return { text: stripThinking(response.text), usage: usageOf(response) };
     } catch (error) {
       throw new Error(describeLlmError(error, settings), { cause: error });
     }
-  };
+  });
 }
 
 /** Turns common local-server failures into actionable messages. */

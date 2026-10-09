@@ -21,7 +21,7 @@ Mapping to the [OWASP Top 10 for LLM Applications](https://genai.owasp.org/llm-t
 | Risk | Relevant attack | Mitigations |
 |------|-----------------|-------------|
 | **LLM01 Prompt Injection** | Direct ("ignorá tus instrucciones…") and indirect (instructions planted in a knowledge doc or a ticket comment) | Delimited untrusted content + explicit rule in every prompt that reads it; deterministic router rule escalates prompt-leak / "ignore instructions" attempts; output guard; adversarial eval cases (`inject-doc`, `inject-direct`, `inject-write-tool`) with an **injection resisted** metric |
-| **LLM02 Sensitive Information Disclosure** | Revealing secrets, credentials or the system prompt; leaking user questions into logs | Secret requests always escalated; token formats redacted on output; secrets only in environment variables |
+| **LLM02 Sensitive Information Disclosure** | Revealing secrets, credentials or the system prompt; leaking user questions into logs | Secret requests always escalated; token formats redacted on output; secrets only in environment variables; traces hold metadata only (no prompts, questions or replies) |
 | **LLM06 Excessive Agency** | The model calling a write tool, or a tool the operator did not intend | Read-only catalog of three tools; `TOOL_POLICIES` declares each `readOnly: true` with `always_allow` / `always_ask`; `McpToolProvider` refuses any tool outside the allowlist at call time, refuses mappings for unknown local names, and refuses to start if a mapped MCP tool is annotated `destructiveHint: true` or `readOnlyHint: false`; irreversible requests pause for a human (`interrupt`) and even approved drafts are executed by people |
 
 ## Tool allowlist (least privilege)
@@ -42,6 +42,7 @@ export const TOOL_POLICIES = {
 ## Secrets handling
 
 - Secrets (`ANTHROPIC_API_KEY`, `LLM_API_KEY`, MCP server credentials) come **only from environment variables** (`.env` is gitignored; `.env.example` holds placeholders). Nothing secret is in the repo, the knowledge base, the prompts or the fixtures.
+- Traces in `data/traces.jsonl` (gitignored) store ids, timings, model, route, token counts and estimated cost — never prompts, retrieved text, questions or replies. The OpenTelemetry GenAI conventions also treat content capture as opt-in.
 - The bot never needs a secret to answer: requests for tokens, passwords or credentials are escalated, and the human answers them through the usual channels.
 
 ## Test fixture and evals

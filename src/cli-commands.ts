@@ -4,11 +4,11 @@ export type CliCommand =
   | { kind: "empty" }
   | { kind: "ask"; text: string }
   | { kind: "approve" | "reject"; id: number; note?: string }
-  | { kind: "status" | "pending" | "quit" | "help" }
+  | { kind: "status" | "pending" | "stats" | "quit" | "help" }
   | { kind: "invalid"; message: string };
 
 export const HELP_TEXT =
-  "Comandos: /aprobar <número> [nota], /rechazar <número> [nota], /estado, /pendientes, /ayuda, /salir. Cualquier otro texto es una consulta.";
+  "Comandos: /aprobar <número> [nota], /rechazar <número> [nota], /estado, /pendientes, /stats, /ayuda, /salir. Cualquier otro texto es una consulta.";
 
 /** Parses one line typed in the CLI. Pure, so it is unit-tested without a terminal. */
 export function parseCommand(line: string): CliCommand {
@@ -29,6 +29,8 @@ export function parseCommand(line: string): CliCommand {
       return { kind: "status" };
     case "/pendientes":
       return { kind: "pending" };
+    case "/stats":
+      return { kind: "stats" };
     case "/salir":
       return { kind: "quit" };
     case "/ayuda":

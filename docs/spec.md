@@ -36,6 +36,15 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 
 `npm run eval` still calls the graph directly (sequentially), so eval numbers are unaffected by the queue.
 
+## Observability and cost
+
+- One trace per graph step (`tracedTurn`): root span `invoke_agent suplente-digital`, child spans per node (`node <name>`), per model call (`chat <model>`) and per tool call (`execute_tool <tool>`). Spans propagate through `AsyncLocalStorage`, so nodes and the `Llm` contract are unchanged.
+- Attributes follow the OpenTelemetry GenAI semantic conventions: `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.conversation.id`, `gen_ai.tool.name`, `server.address`; app-specific ones use the `app.` prefix (`app.route`, `app.outcome`, `app.graph.node`). Every span has `durationMs`.
+- Token usage comes from LangChain `usage_metadata`; when absent, the summary marks `usageReported: false`.
+- Estimated cost = tokens × `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` (USD per million tokens, default 0).
+- Exporters implement `TraceExporter`; `JsonlTraceExporter` writes `data/traces.jsonl` (metadata only). Export failures are logged, never thrown into the request.
+- `npm run eval` prints p50/p95 latency per case, average tokens and total cost; the CLI `/stats` command prints the same for the session.
+
 ## Routes
 
 | Route | Trigger | Behavior |

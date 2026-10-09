@@ -1,18 +1,39 @@
-import { Command, END, MemorySaver, START, StateGraph, type BaseCheckpointSaver } from "@langchain/langgraph";
+import { Command, END, isGraphInterrupt, MemorySaver, START, StateGraph, type BaseCheckpointSaver } from "@langchain/langgraph";
+import { withSpan, type Tracer } from "../observability/tracing.js";
+import type { ToolProvider } from "../tools/types.js";
 import { makeAnswerNode } from "./answer.js";
 import { makeDraftNode, makeHumanReviewNode, outOfScopeNode } from "./escalate.js";
 import { makeRouterNode } from "./router.js";
 import { AgentState, type GraphDeps, type ReviewDecision, type ReviewRequest, type State } from "./state.js";
 import { makeTaskNode } from "./task.js";
 
+/** Wraps a graph node in a span; a LangGraph interrupt (human review pause) is control flow, not an error. */
+function traced<S, U>(name: string, node: (state: S) => U | Promise<U>): (state: S) => Promise<U> {
+  return (state) =>
+    withSpan(`node ${name}`, { "app.graph.node": name }, async () => node(state), { isExpectedError: isGraphInterrupt });
+}
+
+/** Adds an OTel GenAI `execute_tool` span around every tool call. */
+function tracedTools(tools: ToolProvider): ToolProvider {
+  return {
+    name: tools.name,
+    call: (call) =>
+      withSpan(`execute_tool ${call.tool}`, { "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": call.tool, "app.tool.provider": tools.name }, () =>
+        tools.call(call),
+      ),
+    close: tools.close?.bind(tools),
+  };
+}
+
 export function buildGraph(deps: GraphDeps, checkpointer: BaseCheckpointSaver = new MemorySaver()) {
+  const nodeDeps = { ...deps, tools: tracedTools(deps.tools) };
   return new StateGraph(AgentState)
-    .addNode("router", makeRouterNode(deps.llm))
-    .addNode("rag_answer", makeAnswerNode(deps))
-    .addNode("run_task", makeTaskNode(deps))
-    .addNode("draft_escalation", makeDraftNode(deps))
-    .addNode("human_review", makeHumanReviewNode(deps))
-    .addNode("out_of_scope", outOfScopeNode)
+    .addNode("router", traced("router", makeRouterNode(deps.llm)))
+    .addNode("rag_answer", traced("rag_answer", makeAnswerNode(nodeDeps)))
+    .addNode("run_task", traced("run_task", makeTaskNode(nodeDeps)))
+    .addNode("draft_escalation", traced("draft_escalation", makeDraftNode(nodeDeps)))
+    .addNode("human_review", traced("human_review", makeHumanReviewNode(nodeDeps)))
+    .addNode("out_of_scope", traced("out_of_scope", outOfScopeNode))
     .addEdge(START, "router")
     .addConditionalEdges("router", (state) => state.route, {
       question: "rag_answer",
@@ -47,6 +68,34 @@ async function readTurn(graph: AgentGraph, threadId: string): Promise<AgentTurn>
 export async function askAgent(graph: AgentGraph, question: string, threadId: string): Promise<AgentTurn> {
   await graph.invoke({ question }, threadConfig(threadId));
   return readTurn(graph, threadId);
+}
+
+/**
+ * Runs one graph step (a new question or a resume after review) as one trace, root span
+ * `invoke_agent suplente-digital`. Without a tracer it just runs the step.
+ */
+export async function tracedTurn(
+  tracer: Tracer | undefined,
+  threadId: string,
+  step: "ask" | "resume",
+  run: () => Promise<AgentTurn>,
+): Promise<AgentTurn> {
+  if (!tracer) return run();
+  const attributes = {
+    "gen_ai.operation.name": "invoke_agent",
+    "gen_ai.agent.name": "suplente-digital",
+    "gen_ai.conversation.id": threadId,
+    "app.step": step,
+  };
+  const { result } = await tracer.trace("invoke_agent suplente-digital", attributes, async (root) => {
+    const turn = await run();
+    root.setAttributes({
+      "app.route": turn.state.route ?? "unknown",
+      "app.outcome": turn.review ? "needs_approval" : (turn.state.outcome ?? "unknown"),
+    });
+    return turn;
+  });
+  return result;
 }
 
 export async function resumeAgent(graph: AgentGraph, decision: ReviewDecision, threadId: string): Promise<AgentTurn> {

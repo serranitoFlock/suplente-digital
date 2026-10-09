@@ -37,6 +37,7 @@ flowchart LR
 | Tools | `src/tools/*`, `src/graph/task.ts` | `ToolProvider` interface; mock by default, MCP client when configured |
 | Human-in-the-loop | `src/graph/escalate.ts` | LangGraph `interrupt()`; the bot never executes the action |
 | Pending log | `src/pending/*` | Append-only JSON + grouped "welcome back" summary |
+| Observability | `src/observability/*` | One trace per request, OTel GenAI attribute names, JSONL exporter, token usage and estimated cost, `/stats` |
 | Model | `src/llm.ts` | `LLM_PROVIDER=openai-compatible` (default: `ChatOpenAI` against a local Ollama / llama.cpp server) or `anthropic` (`ChatAnthropic`); `<think>` blocks are stripped |
 
 The full spec lives in [`docs/spec.md`](docs/spec.md).
@@ -59,7 +60,7 @@ Other scripts:
 | Script | What it does |
 |--------|--------------|
 | `npm run summary` | Welcome-back report from `data/pending.json` |
-| `npm run eval` | Runs `evals/questions.json` through the graph and prints route accuracy, fact hit rate, correct "no sé" and injection resisted |
+| `npm run eval` | Runs `evals/questions.json` through the graph and prints route accuracy, fact hit rate, correct "no sé", injection resisted, p50/p95 latency, tokens and estimated cost |
 | `npm test` | Unit tests (no network: fake LLM and fake embeddings) |
 | `npm run typecheck` | `tsc --noEmit` |
 
@@ -109,7 +110,31 @@ A Teams (or Slack) adapter would plug in like this:
 
 For production, swap the in-process queue and `MemorySaver` for durable ones (see T3 in the task list) so jobs survive restarts.
 
-CLI commands: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/ayuda`, `/salir`. Results print tagged with their number and the prompt is redrawn, so you can keep typing while earlier questions run. On `/salir` or end of input the CLI waits for running jobs; jobs still awaiting approval are reported and nothing is executed.
+CLI commands: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/stats`, `/ayuda`, `/salir`. Results print tagged with their number and the prompt is redrawn, so you can keep typing while earlier questions run. On `/salir` or end of input the CLI waits for running jobs; jobs still awaiting approval are reported and nothing is executed.
+
+## Observability and cost
+
+Every request is one trace (root span `invoke_agent suplente-digital`) with a span per graph node (`node router`, `node rag_answer`, …), per model call (`chat <model>`) and per tool call (`execute_tool <tool>`). Attribute names follow the [OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai):
+
+| Attribute | Example |
+|-----------|---------|
+| `gen_ai.operation.name` | `invoke_agent`, `chat`, `execute_tool` |
+| `gen_ai.provider.name` / `gen_ai.request.model` / `server.address` | `openai-compatible` / `bonsai` / `localhost` |
+| `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` | from LangChain `usage_metadata` (absent if the server does not report it) |
+| `gen_ai.conversation.id`, `app.route`, `app.outcome`, `app.graph.node` | thread id, route, outcome, node name |
+
+- **Where**: `data/traces.jsonl` (gitignored, `TRACES_PATH`), one JSON trace per line with `durationMs` per span and a per-request `summary` (tokens, LLM calls, estimated cost). Metadata only: prompts, questions and replies are never written.
+- **Pluggable**: exporters implement `TraceExporter` (`src/observability/tracing.ts`); an OTel or Langfuse exporter can be added without touching the graph. No OTel dependency is required today.
+- **Cost**: `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` (USD per million tokens, default `0` for a local model). No vendor prices are hardcoded: set your provider's current rates to get estimates.
+- **Where to read it**: `npm run eval` prints p50/p95 latency per case, average tokens and total estimated cost; in the CLI, `/stats` shows the same for the session.
+
+```text
+vos> /stats
+Consultas procesadas: 3
+Latencia: p50 9.8 s · p95 14.2 s
+Tokens promedio por consulta: entrada 1450 · salida 120 (con uso reportado: 3/3)
+Costo estimado total: US$ 0.0000 (tarifas en 0: modelo local o LLM_COST_* sin configurar)
+```
 
 ## Run with a local model
 

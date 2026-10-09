@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { resolve } from "node:path";
 import { resolveLlmSettings, type LlmSettings } from "./llm.js";
+import { resolveCostRates, type CostRates } from "./observability/tracing.js";
 import { resolveAllowedLinkHosts } from "./security/guards.js";
 import { resolveConcurrency } from "./service/assistant-service.js";
 
@@ -11,6 +12,8 @@ export const config = {
   knowledgeDir: resolve(root, "knowledge"),
   indexPath: resolve(root, env("INDEX_PATH") ?? "data/index.json"),
   pendingPath: resolve(root, env("PENDING_PATH") ?? "data/pending.json"),
+  /** One JSON trace per request (metadata only: no prompts or replies). */
+  tracesPath: resolve(root, env("TRACES_PATH") ?? "data/traces.jsonl"),
   embeddingModel: env("EMBEDDING_MODEL") ?? "Xenova/multilingual-e5-small",
   transformersCacheDir: resolve(root, env("TRANSFORMERS_CACHE_DIR") ?? ".cache/transformers"),
   retrieval: { topK: 4, minScore: 0.82 },
@@ -30,6 +33,11 @@ export const config = {
 } as const;
 
 export type AppConfig = typeof config;
+
+/** Estimated-cost rates (`LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK`, USD per million tokens, default 0). */
+export function loadCostRates(): CostRates {
+  return resolveCostRates(process.env);
+}
 
 /** LLM provider settings from the environment (`LLM_PROVIDER`, `LLM_MODEL`, ...). Throws on missing/invalid config. */
 export function loadLlmSettings(): LlmSettings {
