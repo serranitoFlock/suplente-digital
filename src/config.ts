@@ -1,11 +1,11 @@
 import "dotenv/config";
 import { resolve } from "node:path";
+import { resolveLlmSettings, type LlmSettings } from "./llm.js";
 
 const root = process.cwd();
 const env = (name: string): string | undefined => process.env[name]?.trim() || undefined;
 
 export const config = {
-  model: env("ANTHROPIC_MODEL") ?? "claude-sonnet-5-5",
   knowledgeDir: resolve(root, "knowledge"),
   indexPath: resolve(root, env("INDEX_PATH") ?? "data/index.json"),
   pendingPath: resolve(root, env("PENDING_PATH") ?? "data/pending.json"),
@@ -25,6 +25,7 @@ export const config = {
 
 export type AppConfig = typeof config;
 
-export function hasAnthropicCredentials(): boolean {
-  return Boolean(env("ANTHROPIC_API_KEY"));
+/** LLM provider settings from the environment (`LLM_PROVIDER`, `LLM_MODEL`, ...). Throws on missing/invalid config. */
+export function loadLlmSettings(): LlmSettings {
+  return resolveLlmSettings(process.env);
 }

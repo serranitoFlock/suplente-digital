@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
-import { config, hasAnthropicCredentials } from "./config.js";
+import { config, loadLlmSettings } from "./config.js";
 import { askAgent, buildGraph, resumeAgent, type AgentTurn } from "./graph/graph.js";
-import { createClaudeLlm } from "./llm.js";
+import { createLlm, describeLlm } from "./llm.js";
 import { PendingStore } from "./pending/store.js";
 import { renderWelcomeBack } from "./pending/summary.js";
 import { LocalE5Embedder } from "./rag/embeddings.js";
@@ -9,10 +9,7 @@ import { Retriever } from "./rag/retriever.js";
 import { createToolProvider } from "./tools/mcp-provider.js";
 
 async function main(): Promise<void> {
-  if (!hasAnthropicCredentials()) {
-    console.error("Falta ANTHROPIC_API_KEY. Copiá .env.example a .env y completalo.");
-    process.exit(1);
-  }
+  const llmSettings = loadLlmSettings();
 
   const pending = new PendingStore(config.pendingPath);
   const tools = await createToolProvider(config.mcp);
@@ -21,10 +18,10 @@ async function main(): Promise<void> {
     new LocalE5Embedder(config.embeddingModel, config.transformersCacheDir),
     config.retrieval,
   );
-  const graph = buildGraph({ llm: createClaudeLlm(config.model), retriever, tools, pending });
+  const graph = buildGraph({ llm: createLlm(llmSettings), retriever, tools, pending });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
-  console.log(`Suplente digital (modelo ${config.model}, herramientas: ${tools.name}).`);
+  console.log(`Suplente digital (modelo ${describeLlm(llmSettings)}, herramientas: ${tools.name}).`);
   console.log("Escribí tu consulta. Comandos: /pendientes, /salir\n");
 
   try {

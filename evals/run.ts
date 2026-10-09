@@ -1,10 +1,10 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { config, hasAnthropicCredentials } from "../src/config.js";
+import { config, loadLlmSettings } from "../src/config.js";
 import { askAgent, buildGraph, resumeAgent } from "../src/graph/graph.js";
 import type { Route } from "../src/graph/state.js";
-import { createClaudeLlm } from "../src/llm.js";
+import { createLlm, describeLlm } from "../src/llm.js";
 import { PendingStore } from "../src/pending/store.js";
 import { LocalE5Embedder } from "../src/rag/embeddings.js";
 import { Retriever } from "../src/rag/retriever.js";
@@ -21,10 +21,9 @@ interface EvalCase {
 const normalize = (text: string) => text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 async function main(): Promise<void> {
-  if (!hasAnthropicCredentials()) {
-    console.error("Eval requires ANTHROPIC_API_KEY (copy .env.example to .env). No requests were made.");
-    process.exit(1);
-  }
+  // Throws a readable error (missing LLM_MODEL / ANTHROPIC_API_KEY) before any request is made.
+  const llmSettings = loadLlmSettings();
+  console.log(`Eval model: ${describeLlm(llmSettings)}`);
 
   const cases = JSON.parse(await readFile(new URL("./questions.json", import.meta.url), "utf8")) as EvalCase[];
   const tmp = await mkdtemp(join(tmpdir(), "suplente-eval-"));
@@ -35,7 +34,7 @@ async function main(): Promise<void> {
   );
   // Mock tools and an isolated pending log keep eval runs reproducible and side-effect free.
   const graph = buildGraph({
-    llm: createClaudeLlm(config.model),
+    llm: createLlm(llmSettings),
     retriever,
     tools: new MockToolProvider(),
     pending: new PendingStore(join(tmp, "pending.json")),

@@ -34,17 +34,17 @@ flowchart LR
 | Tools | `src/tools/*`, `src/graph/task.ts` | `ToolProvider` interface; mock by default, MCP client when configured |
 | Human-in-the-loop | `src/graph/escalate.ts` | LangGraph `interrupt()`; the bot never executes the action |
 | Pending log | `src/pending/*` | Append-only JSON + grouped "welcome back" summary |
-| Model | `src/llm.ts` | `ChatAnthropic`, model from `ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) |
+| Model | `src/llm.ts` | `LLM_PROVIDER=openai-compatible` (default: `ChatOpenAI` against a local Ollama / llama.cpp server) or `anthropic` (`ChatAnthropic`); `<think>` blocks are stripped |
 
 The full spec lives in [`docs/spec.md`](docs/spec.md).
 
 ## Quickstart
 
-Requirements: Node.js ≥ 20 and an Anthropic API key (only needed for chat and evals).
+Requirements: Node.js ≥ 20 and an LLM for chat and evals: a local model behind an OpenAI-compatible server (default, no API key) or an Anthropic API key.
 
 ```bash
 npm install
-cp .env.example .env          # set ANTHROPIC_API_KEY
+cp .env.example .env          # pick the LLM (see "Run with a local model")
 npm run ingest                # downloads the embedding model once, builds data/index.json
 npm run dev                   # interactive chat
 ```
@@ -72,6 +72,27 @@ vos> Mergeá el MR de acme-card a main
 [Pedido sensible: requiere aprobación del backup humano]
 backup> ¿Aprobar la respuesta propuesta? (s/n)
 ```
+
+## Run with a local model
+
+The default provider (`LLM_PROVIDER=openai-compatible`) talks to any OpenAI-compatible `/v1` endpoint. `LLM_MODEL` is required; `LLM_API_KEY` is optional (local servers ignore it).
+
+**Ollama** (default `LLM_BASE_URL=http://localhost:11434/v1`):
+
+```bash
+ollama pull qwen3:8b
+ollama serve                  # if it is not already running
+# .env: LLM_MODEL=qwen3:8b
+```
+
+**PrismML Bonsai 27B (1-bit)** — recommended temperature 0.5 (the default `LLM_TEMPERATURE`):
+
+- If your Ollama version supports the `Q1_0` quantization type: `ollama pull hf.co/prism-ml/Bonsai-27B-gguf:Q1_0` and set `LLM_MODEL=hf.co/prism-ml/Bonsai-27B-gguf:Q1_0`.
+- Otherwise use PrismML's llama.cpp build and run its `llama-server` on port 8080 with the Bonsai GGUF, then set `LLM_BASE_URL=http://localhost:8080/v1` and `LLM_MODEL` to the model name the server reports.
+
+Reasoning models (Qwen3, Bonsai) may emit `<think>…</think>` blocks: they are stripped before routing and answering. `LLM_DISABLE_THINKING=true` (default) also sends `chat_template_kwargs: {enable_thinking: false}`, which llama.cpp honors and other servers ignore. If the server is down, chat and evals fail with a message naming `LLM_BASE_URL` and `ollama serve`.
+
+To use Claude instead: `LLM_PROVIDER=anthropic` plus `ANTHROPIC_API_KEY` (optional `ANTHROPIC_MODEL`).
 
 ## Adapting it to another person or team
 

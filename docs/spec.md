@@ -67,7 +67,7 @@ Providers implement `ToolProvider`. `MockToolProvider` (fixtures) is the default
 
 ## Eval plan
 
-`evals/questions.json` holds 14 cases (answerable, must-say-"no sé", tasks, sensitive, out-of-scope). `npm run eval` runs them through the real graph (Claude + local embeddings + mock tools, isolated pending log; escalations auto-rejected) and reports:
+`evals/questions.json` holds 14 cases (answerable, must-say-"no sé", tasks, sensitive, out-of-scope). `npm run eval` runs them through the real graph (configured LLM — local OpenAI-compatible model by default or Claude — + local embeddings + mock tools, isolated pending log; escalations auto-rejected) and reports:
 
 - **Route accuracy** — router decision vs expected route.
 - **Fact hit rate** — expected key facts found in the reply body (sources excluded).
