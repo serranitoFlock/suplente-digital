@@ -11,7 +11,7 @@ import { JsonlTraceExporter, Tracer, type TraceSummary } from "../src/observabil
 import { PendingStore } from "../src/pending/store.js";
 import { LocalE5Embedder } from "../src/rag/embeddings.js";
 import { mean, recallAtK, reciprocalRank } from "../src/rag/metrics.js";
-import { Retriever } from "../src/rag/retriever.js";
+import { Retriever, type VectorIndex } from "../src/rag/retriever.js";
 import { MockToolProvider } from "../src/tools/mock-provider.js";
 import { countFacts, injectionResisted, mergeSummaries } from "./scoring.js";
 
@@ -38,6 +38,8 @@ interface EvalCase {
   note?: string;
   /** Strings the reply must not mention (e.g. an unrelated ticket a wrong follow-up would invent). */
   mustNotMention?: string[];
+  /** Sources that filters must keep out of the index (e.g. superseded or personal Engram notes); also checks `mustNotMention`. */
+  excludedSources?: string[];
 }
 
 const isMultiTurn = (c: EvalCase) => Boolean(c.conversation?.length || c.history?.length || c.mustNotCallTools);
@@ -82,8 +84,20 @@ async function evaluateRetrieval(cases: EvalCase[], embedder: LocalE5Embedder): 
 async function main(): Promise<void> {
   const retrievalOnly = process.argv.includes("--retrieval-only");
   const cases = JSON.parse(await readFile(new URL("./questions.json", import.meta.url), "utf8")) as EvalCase[];
+  const index = JSON.parse(await readFile(config.indexPath, "utf8").catch(() => {
+    throw new Error(`Index not found at ${config.indexPath}. Run \`npm run ingest\` first.`);
+  })) as VectorIndex;
+  const indexedSources = new Set(index.chunks.map((chunk) => chunk.source));
+  // Real Engram notes change what the index holds; rebuild with ENGRAM_REAL=false for reproducible runs.
+  console.log(`Index: ${index.chunks.length} chunks (${Object.entries(index.composition ?? { knowledge: index.chunks.length }).map(([origin, n]) => `${origin} ${n}`).join(", ")})`);
+  if ((index.composition?.["engram-real"] ?? 0) > 0) {
+    console.log("Warning: the index includes real Engram notes; the expectations assume the fictional knowledge base (e.g. \"no sé\" cases may get real answers). Rebuild with ENGRAM_REAL=false npm run ingest for reproducible results.");
+  }
   const embedder = new LocalE5Embedder(config.embeddingModel, config.transformersCacheDir);
   await evaluateRetrieval(cases, embedder);
+  const excluded = cases.filter((c) => c.excludedSources?.length);
+  const leaked = excluded.flatMap((c) => c.excludedSources!.filter((source) => indexedSources.has(source)));
+  console.log(`Filtered sources indexed: ${leaked.length} (${leaked.length ? leaked.join(", ") : "none"}) across ${excluded.length} case(s)`);
   if (retrievalOnly) return;
 
   // Throws a readable error (missing LLM_MODEL / ANTHROPIC_API_KEY) before any request is made.
@@ -137,6 +151,9 @@ async function main(): Promise<void> {
         ms: caseSummary.durationMs,
         tokens: caseSummary.usageReported ? caseSummary.inputTokens + caseSummary.outputTokens : "n/a",
         injectionOk: testCase.mustNotContain ? injectionResisted([turn.state.answer, turn.state.draft], testCase.mustNotContain) : undefined,
+        filteredOk: testCase.excludedSources?.length
+          ? testCase.excludedSources.every((source) => !indexedSources.has(source)) && injectionResisted([turn.state.answer], testCase.mustNotMention ?? [])
+          : undefined,
         multiTurnOk: isMultiTurn(testCase)
           ? turn.state.route === testCase.expectedRoute &&
             hits === testCase.expectedFacts.length &&
@@ -157,6 +174,7 @@ async function main(): Promise<void> {
   console.log(`Fact hit rate:       ${factRates.length ? `${Math.round((100 * factRates.reduce((a, b) => a + b, 0)) / factRates.length)}%` : "n/a"}`);
   console.log(`Correct "no sé":     ${pct(rows.flatMap((r) => (r.noSeOk === undefined ? [] : [r.noSeOk])))}`);
   console.log(`Injection resisted:  ${pct(rows.flatMap((r) => (r.injectionOk === undefined ? [] : [r.injectionOk])))}`);
+  console.log(`Filtered notes unused: ${pct(rows.flatMap((r) => (r.filteredOk === undefined ? [] : [r.filteredOk])))} (excluded sources not indexed, reply free of their facts)`);
   console.log(`Follow-up / clarify: ${pct(rows.flatMap((r) => (r.multiTurnOk === undefined ? [] : [r.multiTurnOk])))} (route, facts, no invented ids, no tool call when a clarification is expected)`);
 
   const stats = computeStats(caseSummaries);
