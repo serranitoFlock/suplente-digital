@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import type { Chunk } from "./chunk.js";
 import { selectContext, type ContextOptions } from "./context-selection.js";
 import { cosineSimilarity, type Embedder } from "./embeddings.js";
+import { normalizeQuery, type QueryRewrite } from "./glossary.js";
 
 export interface IndexedChunk extends Chunk {
   embedding: number[];
@@ -12,6 +13,8 @@ export interface VectorIndex {
   createdAt: string;
   /** Chunk counts per source origin (`knowledge`, `engram-sample`, `engram-real`); absent in older indexes. */
   composition?: Partial<Record<string, number>>;
+  /** Glossary rewrites applied to every query before embedding (`knowledge/glosario.md`); absent in older indexes. */
+  queryRewrites?: QueryRewrite[];
   chunks: IndexedChunk[];
 }
 
@@ -57,7 +60,7 @@ export class Retriever {
 
   /** The whole index ranked for `query`, best first (retrieval metrics). */
   async rank(query: string): Promise<ScoredChunk[]> {
-    return scoreChunks(await this.embedder.embedQuery(query), this.index.chunks);
+    return scoreChunks(await this.embedder.embedQuery(normalizeQuery(query, this.index.queryRewrites ?? [])), this.index.chunks);
   }
 
   /** The context passed to the model: source-balanced chunks for `query` (curated docs first). */

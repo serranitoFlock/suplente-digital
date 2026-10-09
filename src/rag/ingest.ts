@@ -6,6 +6,7 @@ import { chunkMarkdown, stripHtmlComments, type Chunk } from "./chunk.js";
 import { engramSourceDocs, filterObservations, parseEngramExport, type DropReason } from "./engram.js";
 import { loadEngramSourcesConfig } from "./engram-config.js";
 import { LocalE5Embedder, type Embedder } from "./embeddings.js";
+import { GLOSSARY_FILE, parseGlossary, type QueryRewrite } from "./glossary.js";
 import type { VectorIndex } from "./retriever.js";
 
 export type SourceOrigin = "knowledge" | "engram-sample" | "engram-real";
@@ -20,7 +21,8 @@ export interface SourceDoc {
 }
 
 export async function loadKnowledge(dir: string): Promise<SourceDoc[]> {
-  const files = (await readdir(dir)).filter((f) => f.endsWith(".md")).sort();
+  // The glossary rewrites queries (see glossary.ts); indexed as a doc it would compete for the doc slots.
+  const files = (await readdir(dir)).filter((f) => f.endsWith(".md") && f !== GLOSSARY_FILE).sort();
   return Promise.all(files.map(async (source) => ({ source, markdown: await readFile(join(dir, source), "utf8"), origin: "knowledge" as const })));
 }
 
@@ -102,7 +104,16 @@ export function contextualPassage(chunk: Chunk, title: string): string {
   return [`Documento: ${title || chunk.source}`, chunk.heading && `Sección: ${chunk.heading}`, chunk.text].filter(Boolean).join("\n");
 }
 
-export async function buildIndexFromDocs(docs: SourceDoc[], embedder: Embedder): Promise<VectorIndex> {
+/** The glossary's query rewrites; none when `knowledge/glosario.md` is missing. */
+export async function loadGlossary(dir: string): Promise<QueryRewrite[]> {
+  try {
+    return parseGlossary(await readFile(join(dir, GLOSSARY_FILE), "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+export async function buildIndexFromDocs(docs: SourceDoc[], embedder: Embedder, queryRewrites: QueryRewrite[] = []): Promise<VectorIndex> {
   const prepared = docs.flatMap((doc) => {
     const title = doc.title ?? documentTitle(doc.markdown);
     return chunkMarkdown(doc.source, doc.markdown).map((chunk) => ({ chunk, origin: doc.origin ?? "knowledge", passage: contextualPassage(chunk, title) }));
@@ -115,6 +126,7 @@ export async function buildIndexFromDocs(docs: SourceDoc[], embedder: Embedder):
     model: embedder.model,
     createdAt: new Date().toISOString(),
     composition,
+    ...(queryRewrites.length > 0 ? { queryRewrites } : {}),
     chunks: chunks.map((chunk, i) => ({ ...chunk, embedding: vectors[i]! })),
   };
 }
@@ -129,7 +141,9 @@ async function main(): Promise<void> {
   }
   const docs = [...knowledge, ...engram.docs];
   console.log(`Indexing ${knowledge.length} knowledge documents + ${engram.docs.length} Engram notes with ${config.embeddingModel} (first run downloads the model)...`);
-  const index = await buildIndexFromDocs(docs, new LocalE5Embedder(config.embeddingModel, config.transformersCacheDir));
+  const queryRewrites = await loadGlossary(config.knowledgeDir);
+  console.log(`Glossary: ${queryRewrites.length} query rewrite(s) from ${GLOSSARY_FILE}`);
+  const index = await buildIndexFromDocs(docs, new LocalE5Embedder(config.embeddingModel, config.transformersCacheDir), queryRewrites);
   await mkdir(dirname(config.indexPath), { recursive: true });
   await writeFile(config.indexPath, JSON.stringify(index));
   console.log(`Wrote ${index.chunks.length} chunks to ${config.indexPath} (${Object.entries(index.composition ?? {}).map(([origin, n]) => `${origin} ${n}`).join(", ")})`);
