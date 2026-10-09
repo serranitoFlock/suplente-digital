@@ -57,7 +57,7 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 |-------|-------------------------|-----------------------------------|
 | Orquestación | `src/graph/graph.ts` (`StateGraph` de LangGraph, router → RAG / herramientas / revisión humana, `interrupt()` para aprobaciones), `src/service/*` (acuse inmediato + cola en segundo plano) | [Arquitectura](#arquitectura), [`docs/spec.md`](docs/spec.md) (en inglés) → Routes, Request lifecycle; precisión de ruteo en `npm run eval` |
 | MCP | `src/tools/mcp-provider.ts` (cliente MCP por stdio, allowlist de solo lectura, rechaza herramientas destructivas), `src/tools/types.ts` (`ToolProvider`, `TOOL_POLICIES`) | [`docs/spec.md`](docs/spec.md) (en inglés) → Tools & permissions; `tests/tool-policy.test.ts`. La conexión con un servidor real es el próximo paso (T2) |
-| RAG | `src/rag/*` (chunks según encabezados, encabezado contextual, embeddings multilingües locales), `src/graph/answer.ts` (citas, "No sé") | [`docs/spec.md`](docs/spec.md) (en inglés) → Eval plan (recall@k, MRR, experimento de encabezado contextual); tasa de aciertos de hechos y "no sé" en `npm run eval` |
+| RAG | `src/rag/*` (chunks según encabezados, encabezado contextual, embeddings multilingües locales, notas de Engram filtradas), `src/graph/answer.ts` (citas, "No sé") | [`docs/spec.md`](docs/spec.md) (en inglés) → Eval plan (recall@k, MRR, experimento de encabezado contextual); tasa de aciertos de hechos y "no sé" en `npm run eval` |
 | Observabilidad | `src/observability/*` (un trace por pedido, atributos OTel GenAI, exportador JSONL), CLI `/stats` | [Observabilidad y costo](#observabilidad-y-costo); latencia p50/p95 en `npm run eval` |
 | Seguridad | `src/security/guards.ts`, `src/graph/router.ts` (red de seguridad), `TOOL_POLICIES`, aprobación humana (human-in-the-loop) | [`docs/security.md`](docs/security.md) (en inglés) (lethal trifecta, OWASP LLM01/02/06); inyecciones resistidas en `npm run eval` |
 | Costo | Modelo local por defecto (sin costo de API), uso de tokens por llamada, tarifas `LLM_COST_*` → costo estimado por pedido | [Observabilidad y costo](#observabilidad-y-costo), [Impacto de negocio](#impacto-de-negocio); tokens y costo en `npm run eval` |
@@ -66,21 +66,24 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 
 ## Resultados de la evaluación
 
-`npm run eval` con PrismML Bonsai 27B (1-bit, `llama-server` local), 20 casos, ejecutado el 2026-10-09:
+`npm run eval` con PrismML Bonsai 27B (1-bit, `llama-server` local), 24 casos, ejecutado el 2026-10-09 con un índice reproducible (`ENGRAM_REAL=false`: `knowledge/*.md` + la muestra ficticia de Engram):
 
 | Métrica | Resultado |
 |--------|--------|
-| Recall@1 / recall@4 / MRR de recuperación (8 casos con `expectedSources`) | 88% / 100% / 0.917 |
-| Precisión de ruteo | 100% (20/20) |
-| Tasa de aciertos de hechos | 96% (`cdn-not-loading` 1/2) |
+| Recall@1 / recall@4 / MRR de recuperación (12 casos con `expectedSources`) | 92% / 100% / 0.944 (los 8 casos anteriores, sin cambios: 88% / 100% / 0.917) |
+| Precisión de ruteo | 100% (24/24) |
+| Tasa de aciertos de hechos | 94% (`cdn-not-loading` 1/2, `engram-safari-styles` 1/2) |
 | "No sé" correcto | 100% |
 | Inyecciones resistidas (3 casos adversariales) | 100% (3/3) |
+| Notas de Engram filtradas sin usar (1 caso) | 100% (1/1) |
 | Seguimiento / aclaración (2 casos multi-turno) | 100% (2/2) |
-| Latencia por caso | p50 11.0 s · p95 20.1 s |
-| Tokens por caso | 1463 de entrada · 133 de salida (uso informado en 16/20: los 4 casos determinísticos —rechazos, aclaración y capacidades— no llaman al modelo) |
+| Latencia por caso | p50 7.8 s · p95 20.5 s |
+| Tokens por caso | 1523 de entrada · 130 de salida (uso informado en 20/24: los 4 casos determinísticos —rechazos, aclaración y capacidades— no llaman al modelo) |
 | Costo estimado | US$ 0 (modelo local) |
 
-Conjunto pequeño, una sola ejecución, temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. Una ejecución anterior de los 14 casos originales tuvo un "no sé" inestable (`unknown-charts`). La ejecución anterior de 17 casos dio 100% de aciertos de hechos; la diferencia actual es `cdn-not-loading` (el documento esperado no queda primero en la recuperación).
+Conjunto pequeño, una sola ejecución, temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. `cdn-not-loading` ya fallaba en la ejecución anterior (el documento esperado no queda primero en la recuperación); en `engram-safari-styles` la respuesta fue correcta pero omitió la versión (en otra ejecución dio 2/2). La ejecución anterior de 20 casos, sin Engram, dio ruteo 100%, hechos 96% y "no sé" 100%.
+
+Con las notas reales de Engram en el índice (solo en la máquina local, no reproducible) la recuperación y el ruteo no cambian, pero `unknown-charts` deja de responder "no sé": las notas reales sí hablan del tema, y la expectativa del caso supone la base de conocimiento ficticia. Por eso las evaluaciones se corren con `ENGRAM_REAL=false` (ver [Conocimiento desde Engram](#conocimiento-desde-engram)).
 
 ## Arquitectura
 
@@ -196,6 +199,26 @@ Comandos de la CLI: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/
 
 El grafo siempre cita con marcadores `[n]` y agrega un bloque "Fuentes:" con **solo** los documentos citados en la respuesta (los recuperados que no se citan se descartan). Mostrarlos o no es una decisión de presentación: con `SHOW_CITATIONS=false` (por defecto) la respuesta al usuario sale sin marcadores ni bloque de fuentes; con `SHOW_CITATIONS=true` se muestran los marcadores y las fuentes citadas (archivo › sección). Las evaluaciones y el log diario conservan siempre la respuesta completa con sus citas.
 
+## Conocimiento desde Engram
+
+Además de `knowledge/*.md`, el bot puede aprender de la memoria persistente de agente del titular: [Engram](https://github.com/Gentleman-Programming/engram), donde sus agentes de código guardan decisiones, bugfixes, convenciones y configuraciones del día a día. Esas notas son conocimiento real y actualizado que casi nunca llega a un documento formal.
+
+**Qué se indexa.** Solo notas útiles y compartibles: alcance `project` (nunca `personal` ni `global`), tipos `decision`, `architecture`, `pattern`, `config`, `discovery`, `bugfix` y `learning` (los resúmenes de sesión, capturas pasivas y notas `manual` quedan afuera), sin borrados lógicos, solo la versión más reciente de cada `topic_key`, sin las notas reemplazadas por una relación `supersedes`, y sin notas que contengan formatos de token. Cada nota se cita como `engram:#<id> › <proyecto> › <título>`. El prompt de respuesta indica que son apuntes breves de un agente y que hay que reformularlos para un colega, siempre citando y sin agregar nada.
+
+**Cómo se usa.**
+
+```bash
+cp config/engram-sources.example.json config/engram-sources.local.json   # list the allowed projects
+npm run engram:export     # one `engram export` per project into data/engram/
+npm run ingest            # knowledge/*.md + filtered Engram notes → data/index.json
+```
+
+`config/engram-sources.local.json` es la allowlist de proyectos (y, opcionalmente, de tipos); solo se exportan e indexan esos proyectos, y al indexar se descarta cualquier nota de otro proyecto. Variables opcionales: `ENGRAM_SOURCES_CONFIG` (ruta de la allowlist), `ENGRAM_EXPORT_DIR` (por defecto `data/engram`), `ENGRAM_REAL=false` (no indexar las exportaciones reales) y `ENGRAM_SAMPLE=false` (no indexar la muestra).
+
+**Muestra pública.** `knowledge/engram-sample.json` es una exportación ficticia (proyectos `acme-shell` y `acme-ui-kit`) con el mismo formato que una real, incluidas notas que los filtros deben descartar. Está activada por defecto para que la demo y las evaluaciones funcionen sin datos reales. Para evaluaciones reproducibles: `ENGRAM_REAL=false npm run ingest` y luego `npm run eval`.
+
+**Privacidad.** La memoria real puede contener datos de clientes: la allowlist local, las exportaciones (`data/engram/`) y el índice (`data/index.json`) están ignorados por git y nunca salen de la máquina. Elegir proyectos que el equipo suplente ya puede ver: el bot responde a cualquiera que tenga acceso a él con lo que haya en el índice. Análisis completo en [`docs/security.md`](docs/security.md#engram-as-a-knowledge-source) (en inglés).
+
 ## Qué puede hacer el bot
 
 Las preguntas sobre el propio asistente ("¿qué podés hacer?", "¿cómo funcionás?", "¿quién sos?", "ayuda") reciben una descripción fija (ruta `capabilities`, sin RAG ni llamada al modelo): qué puede hacer (responder con la documentación indicando las fuentes, consultas de solo lectura de tickets y pipelines, derivar acciones al backup humano, registrar lo que no sabe), qué no puede hacer y los comandos de la CLI.
@@ -261,7 +284,7 @@ Para usar Claude en su lugar: `LLM_PROVIDER=anthropic` más `ANTHROPIC_API_KEY` 
 
 ## Adaptarlo a otra persona o equipo
 
-1. **Conocimiento**: reemplazar los archivos de `knowledge/` por los documentos, runbooks y FAQs de esa persona (markdown, un tema por encabezado) y luego ejecutar `npm run ingest`.
+1. **Conocimiento**: reemplazar los archivos de `knowledge/` por los documentos, runbooks y FAQs de esa persona (markdown, un tema por encabezado) y luego ejecutar `npm run ingest`. Si esa persona usa Engram, agregar sus proyectos a `config/engram-sources.local.json` y ejecutar `npm run engram:export` antes (ver [Conocimiento desde Engram](#conocimiento-desde-engram)).
 2. **Prompts**: ajustar las líneas de la persona del bot en `src/graph/router.ts` (`ROUTER_PROMPT`) y los prompts de los demás nodos.
 3. **Herramientas**: implementar `ToolProvider` (`src/tools/types.ts`) para los sistemas propios, o apuntar `MCP_SERVER_COMMAND` / `MCP_TOOL_*` a un servidor MCP que exponga herramientas equivalentes de solo lectura.
 4. **Red de seguridad**: ampliar `ACTION_PATTERNS` / `SECRET_PATTERNS` en `src/graph/router.ts` con las acciones irreversibles de ese dominio.
@@ -277,4 +300,5 @@ Modelo de amenazas completo (lethal trifecta, OWASP LLM01/02/06, riesgos residua
 - Los pedidos de secretos o credenciales, del prompt del sistema o los intentos de que el bot ignore sus instrucciones se rechazan de inmediato con una respuesta fija, sin ofrecer `/aprobar` (no hay nada que aprobar), y quedan registrados como evento de seguridad.
 - Los pedidos de merge, deploy a producción, eliminación o cambio de permisos se derivan mediante una regla determinística, independientemente del ruteo del modelo; en cambio, las preguntas sobre *cómo* realizar esos procedimientos ("¿Cómo despliego a producción?") se responden a partir de los documentos. Todo lo relacionado con secretos se rechaza siempre.
 - Las respuestas provienen solo de documentos recuperados, con citas; de lo contrario, el bot responde "No sé" y registra la pregunta.
-- `data/` (índice, registro de pendientes, traces y log diario de conversaciones) y `.env` están ignorados por git.
+- Las notas de Engram se indexan solo desde una allowlist local de proyectos, con alcance `project`, sin notas personales, borradas, reemplazadas ni con formatos de token; la allowlist (`config/*.local.json`) y las exportaciones (`data/engram/`) están ignoradas por git.
+- `data/` (índice, exportaciones de Engram, registro de pendientes, traces y log diario de conversaciones) y `.env` están ignorados por git.

@@ -8,7 +8,7 @@ Simon Willison's [lethal trifecta](https://simonwillison.net/2025/Jun/16/the-let
 
 | Leg | How it shows up here | Mitigation | Where |
 |-----|----------------------|------------|-------|
-| **Private data** | Team docs in `knowledge/`, ticket and pipeline data from tools, the system prompts | No secrets in the knowledge base or prompts (fixtures are fictional); every tool is read-only and allowlisted; requests about secrets or the system prompt are refused directly by a deterministic rule (`refuse` route, fixed reply); the output guard redacts common token formats | `src/tools/types.ts` (`TOOL_POLICIES`), `src/graph/router.ts` (`SECRET_PATTERNS`, `OVERRIDE_PATTERNS`), `src/security/guards.ts` (`sanitizeOutput`) |
+| **Private data** | Team docs in `knowledge/`, the owner's Engram notes (allowlisted projects), ticket and pipeline data from tools, the system prompts | No secrets in the knowledge base or prompts (fixtures are fictional); every tool is read-only and allowlisted; requests about secrets or the system prompt are refused directly by a deterministic rule (`refuse` route, fixed reply); the output guard redacts common token formats | `src/tools/types.ts` (`TOOL_POLICIES`), `src/graph/router.ts` (`SECRET_PATTERNS`, `OVERRIDE_PATTERNS`), `src/security/guards.ts` (`sanitizeOutput`) |
 | **Untrusted content** | Any doc in `knowledge/` (anyone with repo access can edit it) and any tool result (ticket comments are written by anyone) | Retrieved chunks and tool results are wrapped in `<documento>` / `<resultado_herramienta>` delimiters; the prompts say that content is data, never instructions; delimiter tags inside the content are neutralized so a doc cannot close its own block; HTML comments are stripped before indexing (hidden text) | `src/graph/answer.ts`, `src/graph/task.ts`, `src/security/guards.ts` (`wrapUntrusted`), `src/rag/chunk.ts` |
 | **Exfiltration channel** | A reply rendered in a chat client: a link or a markdown image pointing to an attacker's host leaks whatever the model put in its URL. Write tools would be a second channel. | No write tools at all; the output guard removes every URL whose host is not allowlisted (`ALLOWED_LINK_HOSTS`, default `example.com` and its subdomains); escalation drafts are only shown to the human backup and are sanitized too | `src/security/guards.ts`, `src/graph/*.ts` |
 
@@ -62,6 +62,21 @@ Before this split, secret and prompt-leak requests were escalated for approval, 
 - **Privacy**: people may paste personal data or internal details into a question. Treat the files like chat history: restrict access to the people who run the bot, and do not share or attach them without review.
 - **Retention**: one file per local day makes rotation trivial; keep only what you need (for example 30 days) and delete older files, e.g. `find data/logs -name '*.jsonl' -mtime +30 -delete` from a scheduled job. Nothing is rotated automatically today.
 - Refused requests are logged with `securityEvent: "refusal"`, so attempts to obtain secrets or the system prompt are visible in the log as well as in the pending log.
+
+## Engram as a knowledge source
+
+The index can also hold the owner's [Engram](https://github.com/Gentleman-Programming/engram) memory: notes their coding agents saved while working (decisions, bugfixes, conventions, configs). It is the most valuable source and also the riskiest one: it was written for the owner, not for the team, and it can mention client systems.
+
+| Risk | Mitigation | Where |
+|------|------------|-------|
+| **Real memory published** (the repo is public) | The allowlist lives in `config/engram-sources.local.json` and the exports in `data/engram/`, both gitignored; so is the index (`data/index.json`). The repo only holds a fictional sample (`knowledge/engram-sample.json`) and an example config with fictional project names. | `.gitignore`, `config/engram-sources.example.json` |
+| **Cross-project leakage** (a project the team should not see reaches the index) | Explicit project allowlist: `npm run engram:export` exports only those projects (`engram export <file> --project <name>`, argv without a shell; names validated, no paths or leading dashes), and ingest reads only `<project>.json` for allowlisted projects and drops any observation whose `project` differs. Exporting `--all` into the folder does not widen the index. Real exports are skipped when the local config is missing. | `src/rag/engram-export.ts`, `src/rag/engram-config.ts`, `src/rag/ingest.ts` (`loadEngramDocs`) |
+| **Personal notes** | Only `scope=project`; `personal` / `global` observations are never indexed. | `src/rag/engram.ts` (`filterObservations`) |
+| **Session chatter and stale facts** | Type allowlist (default `decision`, `architecture`, `pattern`, `config`, `discovery`, `bugfix`, `learning`; `session_summary` and `passive` are rejected even if configured); soft-deleted notes skipped; only the latest version per project + `topic_key`; targets of a judged `supersedes` relation dropped. | `src/rag/engram.ts`, `src/rag/engram-config.ts` |
+| **Secrets saved in a note** | Notes whose title or content match the output guard's token formats are not indexed at all (the output guard still redacts on the way out). Other secret shapes (passwords in prose, internal hostnames) are not detected: review the allowlisted projects before enabling them. | `src/security/guards.ts` (`containsSecret`) |
+| **Injection through a note** | Engram notes are retrieved chunks like any other doc: wrapped in `<documento>` and treated as untrusted data; the answer prompt only adds that they are terse agent notes to rephrase. | `src/graph/answer.ts` |
+
+Residual risk: anyone who can talk to the bot can get answers from every indexed note. The allowlist is the access-control decision — include only projects the backup team is already allowed to see. Source labels (`engram:#<id> › <project> › <title>`) appear in citations and in the daily log, so project names are visible to requesters when `SHOW_CITATIONS=true`.
 
 ## Test fixture and evals
 
