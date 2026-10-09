@@ -44,7 +44,7 @@ describe("Retriever with fake embeddings", () => {
       ],
       embedder,
     );
-    const retriever = new Retriever(index, embedder, { topK: 1, minScore: 0.1 });
+    const retriever = new Retriever(index, embedder, { docSlots: 1, minScore: 0.1 });
     const [best] = await retriever.retrieve("¿qué bundle carga el manifiesto del CDN?");
     expect(best?.source).toBe("cdn.md");
     expect(best?.heading).toBe("CDN > Manifiesto");

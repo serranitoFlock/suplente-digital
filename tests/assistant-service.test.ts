@@ -394,7 +394,7 @@ describe("AssistantService with the real graph (fake LLM)", () => {
     const embedder = new FakeEmbedder();
     const graph = buildGraph({
       llm,
-      retriever: new Retriever({ model: embedder.model, createdAt: "", chunks: [] }, embedder, { topK: 2, minScore: 0.5 }),
+      retriever: new Retriever({ model: embedder.model, createdAt: "", chunks: [] }, embedder, { docSlots: 2, minScore: 0.5 }),
       tools: new MockToolProvider(),
       pending: new PendingStore(join(dir, "pending.json")),
     });
@@ -416,7 +416,7 @@ describe("AssistantService with the real graph (fake LLM)", () => {
     const pending = new PendingStore(join(dir, "pending.json"));
     const graph = buildGraph({
       llm,
-      retriever: new Retriever({ model: embedder.model, createdAt: "", chunks: [] }, embedder, { topK: 2, minScore: 0.5 }),
+      retriever: new Retriever({ model: embedder.model, createdAt: "", chunks: [] }, embedder, { docSlots: 2, minScore: 0.5 }),
       tools: new MockToolProvider(),
       pending,
     });

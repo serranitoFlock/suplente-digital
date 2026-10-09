@@ -49,6 +49,12 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 - The graph always produces `[n]` markers and a "Fuentes:" block (evals and logs rely on them). `selectCitedSources` (`src/graph/citations.ts`) keeps only the retrieved sources whose number appears in the reply (original numbers kept, so markers still match) and drops the rest; a reply without markers gets no block. `state.sources` still holds every retrieved chunk; `state.citedSources` the cited ones.
 - Showing them is a presentation decision, not a graph one: `formatAnswerForUser` (`src/presentation/format-answer.ts`), applied by `AssistantService` to `done` events, strips the markers (outside inline code) and the "Fuentes:" block and tidies the leftover spacing/punctuation when `SHOW_CITATIONS=false` (default); with `true` the reply keeps the markers and the cited sources. The event also carries `rawAnswer` (full text, with citations) for logs.
 
+## Retrieval context
+
+- `Retriever.rank` scores the whole index (cosine, best first); `Retriever.retrieve` turns that ranking into the answer context with `selectContext` (`src/rag/context-selection.ts`), a pure function.
+- Why: multilingual-e5-small scores are compressed (relevant chunks within ~0.01 of each other), so with ~1.1k real Engram chunks a plain top-4 let terse notes crowd out the curated doc that held the answer (e.g. the troubleshooting doc at #1, then three notes 0.002–0.005 below it; the model said "No sé").
+- Source balance: candidates are the top `candidates` (20) chunks above `minScore` (0.82). Up to `docSlots` (`RETRIEVAL_DOC_SLOTS`, default 4) come from curated docs (`knowledge/*.md`) and up to `engramSlots` (`RETRIEVAL_ENGRAM_SLOTS`, default 2) from Engram notes (real and sample), each group best first, curated docs first in the prompt. Unused slots are not handed to the other source, with one exception: when no curated chunk passes `minScore`, Engram may also use the doc slots (an Engram-only question still gets up to 6 chunks). The `minScore` cut-off is unchanged, so "no sé" behaves as before.
+
 ## Engram knowledge source
 
 - `npm run engram:export` reads the local allowlist `config/engram-sources.local.json` (`{ "projects": [...], "types"?: [...] }`; shape in `config/engram-sources.example.json`) and runs `engram export data/engram/<project>.json --project <project>` per project (`execFile`, no shell), reporting observation counts. Missing config → error pointing to the example file.
@@ -79,7 +85,7 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 
 | Route | Trigger | Behavior |
 |-------|---------|----------|
-| `question` | Knowledge/procedure question | Retrieve top-k chunks; answer only from context with `[n]` citations; the "Fuentes:" block lists only the cited sources; otherwise reply "No sé" and log pending |
+| `question` | Knowledge/procedure question | Retrieve a source-balanced context (curated docs first, then Engram notes; see "Retrieval context"); answer only from context with `[n]` citations; the "Fuentes:" block lists only the cited sources; otherwise reply "No sé" and log pending |
 | `task` | Live operational info (tickets, pipelines) | Model picks one read-only tool (validated with zod); result summarized |
 | `sensitive` | A real action: merge, deploy, delete, ticket/write changes, permission changes | Draft reply → `interrupt` → human approves/rejects → logged |
 | `refuse` | Requests for secrets/credentials or the system prompt, or attempts to override the instructions | Fixed, polite Spanish refusal; no model call when the rule matches, no approval prompt; logged as a security event (`security_refusal` in the pending log, `app.security_event` on the trace) |
@@ -154,7 +160,7 @@ Threat model and residual risks: [`security.md`](security.md).
 
 Before generation, a retriever-only pass ranks the whole index (no `minScore` cut-off) for every case with `expectedSources` and reports:
 
-- **Recall@1 / recall@k** (k = `retrieval.topK` = 4) — share of expected knowledge files among the top chunks.
+- **Recall@1 / recall@k** (k = `retrieval.docSlots` = 4) — share of expected knowledge files among the top chunks.
 - **MRR** — mean of 1 / rank of the first chunk from an expected file.
 - **Unanswerable cases above `minScore`** — guard rail for "no sé": top score of the `mustSayNoSe` questions.
 

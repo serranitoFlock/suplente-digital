@@ -7,6 +7,7 @@ import { resolveShowCitations } from "./presentation/format-answer.js";
 import { resolveAllowedLinkHosts } from "./security/guards.js";
 import { resolveConcurrency } from "./service/assistant-service.js";
 import { resolveFlag } from "./rag/engram-config.js";
+import { DEFAULT_CONTEXT, resolveSlotCount } from "./rag/context-selection.js";
 
 const root = process.cwd();
 const env = (name: string): string | undefined => process.env[name]?.trim() || undefined;
@@ -21,7 +22,17 @@ export const config = {
   logDir: resolve(root, env("LOG_DIR") ?? "data/logs"),
   embeddingModel: env("EMBEDDING_MODEL") ?? "Xenova/multilingual-e5-small",
   transformersCacheDir: resolve(root, env("TRANSFORMERS_CACHE_DIR") ?? ".cache/transformers"),
-  retrieval: { topK: 4, minScore: 0.82 },
+  /**
+   * Answer context (see `selectContext`): candidates above `minScore`, then up to `docSlots` chunks
+   * from `knowledge/*.md` (`RETRIEVAL_DOC_SLOTS`, default 4) and up to `engramSlots` Engram chunks
+   * (`RETRIEVAL_ENGRAM_SLOTS`, default 2), curated docs first.
+   */
+  retrieval: {
+    minScore: 0.82,
+    candidates: DEFAULT_CONTEXT.candidates,
+    docSlots: resolveSlotCount("RETRIEVAL_DOC_SLOTS", process.env.RETRIEVAL_DOC_SLOTS, DEFAULT_CONTEXT.docSlots),
+    engramSlots: resolveSlotCount("RETRIEVAL_ENGRAM_SLOTS", process.env.RETRIEVAL_ENGRAM_SLOTS, DEFAULT_CONTEXT.engramSlots),
+  },
   /**
    * Engram notes as a second knowledge source (see README, "Conocimiento desde Engram"):
    * `ENGRAM_SOURCES_CONFIG` (local allowlist, default `config/engram-sources.local.json`),

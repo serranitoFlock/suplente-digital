@@ -51,12 +51,12 @@ const pctOf = (value: number | undefined) => (value === undefined ? "n/a" : `${M
  * Ranks the whole index (no `minScore` cut-off) so the metric isolates ranking quality.
  */
 async function evaluateRetrieval(cases: EvalCase[], embedder: LocalE5Embedder): Promise<void> {
-  const k = config.retrieval.topK;
-  const ranker = await Retriever.load(config.indexPath, embedder, { topK: Number.MAX_SAFE_INTEGER, minScore: -1 });
+  const k = config.retrieval.docSlots;
+  const ranker = await Retriever.load(config.indexPath, embedder, config.retrieval);
   const rows = [];
   for (const testCase of cases) {
     if (!testCase.expectedSources?.length) continue;
-    const ranked = (await ranker.retrieve(testCase.question)).map((chunk) => chunk.source);
+    const ranked = (await ranker.rank(testCase.question)).map((chunk) => chunk.source);
     rows.push({
       id: testCase.id,
       expected: testCase.expectedSources.join(", "),
@@ -75,7 +75,7 @@ async function evaluateRetrieval(cases: EvalCase[], embedder: LocalE5Embedder): 
   const { minScore } = config.retrieval;
   const unknown = [];
   for (const testCase of cases.filter((c) => c.mustSayNoSe)) {
-    const [best] = await ranker.retrieve(testCase.question);
+    const [best] = await ranker.rank(testCase.question);
     unknown.push({ id: testCase.id, topScore: Number((best?.score ?? 0).toFixed(3)), aboveMinScore: (best?.score ?? 0) >= minScore });
   }
   console.log(`Unanswerable cases above minScore ${minScore}: ${unknown.filter((u) => u.aboveMinScore).length}/${unknown.length} (${unknown.map((u) => `${u.id} ${u.topScore}`).join(", ")})`);

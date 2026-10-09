@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { Chunk } from "./chunk.js";
+import { selectContext, type ContextOptions } from "./context-selection.js";
 import { cosineSimilarity, type Embedder } from "./embeddings.js";
 
 export interface IndexedChunk extends Chunk {
@@ -18,16 +19,18 @@ export interface ScoredChunk extends Chunk {
   score: number;
 }
 
-export interface RetrievalOptions {
-  topK: number;
-  minScore: number;
+/** How the answer context is picked from the ranking (source slots, `minScore`); see `selectContext`. */
+export type RetrievalOptions = ContextOptions;
+
+/** Every chunk scored against the query, best first (no cut-off). */
+export function scoreChunks(query: number[], chunks: IndexedChunk[]): ScoredChunk[] {
+  return chunks.map(({ embedding, ...chunk }) => ({ ...chunk, score: cosineSimilarity(query, embedding) })).sort((a, b) => b.score - a.score);
 }
 
-export function rankChunks(query: number[], chunks: IndexedChunk[], { topK, minScore }: RetrievalOptions): ScoredChunk[] {
-  return chunks
-    .map(({ embedding, ...chunk }) => ({ ...chunk, score: cosineSimilarity(query, embedding) }))
+/** Plain top-k ranking above `minScore`, regardless of source. */
+export function rankChunks(query: number[], chunks: IndexedChunk[], { topK, minScore }: { topK: number; minScore: number }): ScoredChunk[] {
+  return scoreChunks(query, chunks)
     .filter((chunk) => chunk.score >= minScore)
-    .sort((a, b) => b.score - a.score)
     .slice(0, topK);
 }
 
@@ -52,7 +55,13 @@ export class Retriever {
     return new Retriever(JSON.parse(raw) as VectorIndex, embedder, options);
   }
 
+  /** The whole index ranked for `query`, best first (retrieval metrics). */
+  async rank(query: string): Promise<ScoredChunk[]> {
+    return scoreChunks(await this.embedder.embedQuery(query), this.index.chunks);
+  }
+
+  /** The context passed to the model: source-balanced chunks for `query` (curated docs first). */
   async retrieve(query: string): Promise<ScoredChunk[]> {
-    return rankChunks(await this.embedder.embedQuery(query), this.index.chunks, this.options);
+    return selectContext(await this.rank(query), this.options);
   }
 }

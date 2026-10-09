@@ -104,7 +104,7 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
   const graphFor = (script: Script, minScore = 0.3): AgentGraph =>
     buildGraph({
       llm: fakeLlm(script, calls),
-      retriever: new Retriever(index, embedder, { topK: 2, minScore }),
+      retriever: new Retriever(index, embedder, { docSlots: 2, minScore }),
       tools: new MockToolProvider(),
       pending,
     });
@@ -180,7 +180,7 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
         seenUser = user;
         return "Lo define el manifiesto [1]. Validá en https://exfil.example.net/c?d=x";
       },
-      retriever: new Retriever(index, embedder, { topK: 2, minScore: 0.3 }),
+      retriever: new Retriever(index, embedder, { docSlots: 2, minScore: 0.3 }),
       tools: new MockToolProvider(),
       pending,
     });
@@ -247,7 +247,7 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
           if (system === DRAFT_PROMPT) return "Borrador: lo hace una persona.";
           throw new Error("unexpected prompt");
         },
-        retriever: new Retriever(index, embedder, { topK: 2, minScore: 0.3 }),
+        retriever: new Retriever(index, embedder, { docSlots: 2, minScore: 0.3 }),
         tools,
         pending,
       });

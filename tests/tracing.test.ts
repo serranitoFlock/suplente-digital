@@ -117,7 +117,7 @@ describe("graph tracing (fake LLM, fake embeddings)", () => {
       }));
       const graph = buildGraph({
         llm,
-        retriever: new Retriever(index, embedder, { topK: 2, minScore: 0.3 }),
+        retriever: new Retriever(index, embedder, { docSlots: 2, minScore: 0.3 }),
         tools: new MockToolProvider(),
         pending: new PendingStore(join(dir, "pending.json")),
       });
