@@ -1,9 +1,12 @@
 import { z } from "zod";
 import { extractJson, type Llm } from "../llm.js";
-import { ROUTES, type Route, type State, type Update } from "./state.js";
+import { renderHistory } from "../memory/conversation-memory.js";
+import { resolveReference } from "../memory/references.js";
+import { wrapUntrusted } from "../security/guards.js";
+import { ROUTES, type ConversationTurn, type State, type Update } from "./state.js";
 
 export interface RouterDecision {
-  route: Route;
+  route: (typeof ROUTES)[number];
   topic: string;
   reason: string;
 }
@@ -95,14 +98,36 @@ Mensaje: "Listame los jobs rotos de los últimos 3 días" → {"route": "task", 
 Mensaje: "Subí acme-footer 3.1 a producción ahora" → {"route": "sensitive", "topic": "despliegue", "reason": "pide ejecutar un despliegue a producción"}
 Mensaje: "Dame acceso de maintainer al repo de la shell" → {"route": "sensitive", "topic": "accesos", "reason": "pide cambiar permisos"}
 Mensaje: "¿Qué me recomendás para cenar hoy?" → {"route": "out_of_scope", "topic": "general", "reason": "no es del equipo"}
+Si el mensaje trae la conversación reciente, usala solo para entender a qué se refiere el mensaje actual: clasificá ÚNICAMENTE el mensaje actual.
 Respondé SOLO con JSON: {"route": "...", "topic": "<tema corto en 1-2 palabras>", "reason": "<motivo breve>"}`;
+
+/** Router input: the bare question, or the question plus recent history and a resolved follow-up reference. */
+export function routerInput(question: string, history: ConversationTurn[], resolvedLabel?: string): string {
+  if (history.length === 0 && !resolvedLabel) return question;
+  const parts = [];
+  if (history.length > 0) parts.push(`Conversación reciente:\n${wrapUntrusted("conversacion", renderHistory(history), {})}`);
+  parts.push(`Mensaje actual: ${question}`);
+  if (resolvedLabel) parts.push(`El mensaje actual se refiere a: ${resolvedLabel}`);
+  return parts.join("\n\n");
+}
 
 export function makeRouterNode(llm: Llm) {
   return async (state: State): Promise<Update> => {
-    const decision = parseRouterOutput(await llm(ROUTER_PROMPT, state.question));
-    if (detectSensitive(state.question) && decision.route !== "sensitive") {
-      return { route: "sensitive", topic: decision.topic, routeReason: "regla de seguridad: pedido irreversible o sensible" };
+    const history = state.history ?? [];
+    // Follow-ups ("el primero que me pasaste") are resolved deterministically; never guessed.
+    const reference = resolveReference(state.question, history);
+    if (reference.kind === "ambiguous") {
+      return { route: "clarify", topic: "seguimiento", routeReason: "referencia a un resultado anterior que no se puede resolver", reference };
     }
-    return { route: decision.route, topic: decision.topic, routeReason: decision.reason };
+    const resolvedLabel = reference.kind === "resolved" ? reference.item.label : undefined;
+    const decision = parseRouterOutput(await llm(ROUTER_PROMPT, routerInput(state.question, history, resolvedLabel)));
+    const checkedText = resolvedLabel ? `${state.question} (${resolvedLabel})` : state.question;
+    if (detectSensitive(checkedText) && decision.route !== "sensitive") {
+      return { route: "sensitive", topic: decision.topic, routeReason: "regla de seguridad: pedido irreversible o sensible", reference };
+    }
+    if (reference.kind === "resolved" && (decision.route === "question" || decision.route === "out_of_scope")) {
+      return { route: "task", topic: decision.topic, routeReason: "seguimiento de un resultado anterior", reference };
+    }
+    return { route: decision.route, topic: decision.topic, routeReason: decision.reason, reference };
   };
 }

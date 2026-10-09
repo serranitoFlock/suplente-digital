@@ -1,4 +1,5 @@
 import { interrupt } from "@langchain/langgraph";
+import { CLARIFY_NO_CONTEXT } from "../memory/references.js";
 import { sanitizeOutput } from "../security/guards.js";
 import type { GraphDeps, ReviewDecision, ReviewRequest, State, Update } from "./state.js";
 
@@ -44,5 +45,14 @@ export function outOfScopeNode(): Update {
   return {
     outcome: "out_of_scope",
     answer: "Solo puedo ayudar con temas de arquitectura frontend del equipo (web components, librerías, CDN, pipelines y tickets).",
+  };
+}
+
+/** Follow-up whose reference cannot be resolved: ask instead of guessing (no model or tool call). */
+export function clarifyNode(state: State): Update {
+  return {
+    outcome: "clarify",
+    toolCalls: [],
+    answer: state.reference?.kind === "ambiguous" ? state.reference.message : CLARIFY_NO_CONTEXT,
   };
 }

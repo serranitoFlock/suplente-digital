@@ -94,6 +94,7 @@ flowchart LR
     R -- task --> T[Nodo de tareas<br/>herramientas de solo lectura]
     R -- sensitive --> D[Borrador de respuesta] --> H{{interrupt:<br/>suplente humano}}
     R -- out_of_scope --> O[Rechazo cortés]
+    R -- "clarify (referencia ambigua)" --> C[Pregunta de aclaración]
     A -- "sin contexto → 'No sé'" --> P[(data/pending.json)]
     T -- sin herramienta adecuada --> P
     H -- aprobar / rechazar --> P
@@ -189,6 +190,12 @@ Un adaptador para Teams (o Slack) se conectaría así:
 Para producción, reemplazar la cola en proceso y `MemorySaver` por implementaciones persistentes (ver T3 en la lista de tareas) para que los trabajos sobrevivan a los reinicios.
 
 Comandos de la CLI: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/stats`, `/ayuda`, `/salir`. Los resultados se imprimen etiquetados con su número y el prompt se vuelve a dibujar, de modo que se puede seguir escribiendo mientras se procesan las preguntas anteriores. Con `/salir` o al terminar la entrada, la CLI espera a que finalicen los trabajos en curso; los trabajos que siguen esperando aprobación se informan y no se ejecuta nada.
+
+## Memoria de conversación
+
+El servicio recuerda los últimos turnos de cada solicitante (`MEMORY_TURNS`, por defecto 6; `0` la desactiva): la pregunta, la ruta, la respuesta y los resultados estructurados de las herramientas. Así, un seguimiento como "es sobre el primero que me pasaste, ¿qué pasó?" se resuelve contra la lista de pipelines de la consulta anterior. Las consultas de un mismo solicitante se procesan en orden.
+
+El bot nunca adivina: si la referencia no se puede resolver con certeza (no hay consulta previa, hay varios candidatos o el número no existe), responde con una pregunta breve de aclaración (ruta `clarify`) en lugar de consultar una herramienta con un identificador inventado. La CLI usa un único solicitante local; la API del servicio recibe `requester`.
 
 ## Observabilidad y costo
 

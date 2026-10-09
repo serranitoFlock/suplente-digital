@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { config, loadCostRates, loadLlmSettings } from "../src/config.js";
 import { askAgent, buildGraph, resumeAgent, tracedTurn } from "../src/graph/graph.js";
-import type { Route } from "../src/graph/state.js";
+import type { ConversationTurn, Route } from "../src/graph/state.js";
 import { createLlm, describeLlm } from "../src/llm.js";
+import { toConversationTurn } from "../src/memory/conversation-memory.js";
 import { computeStats, formatUsd } from "../src/observability/stats.js";
 import { JsonlTraceExporter, Tracer, type TraceSummary } from "../src/observability/tracing.js";
 import { PendingStore } from "../src/pending/store.js";
@@ -24,7 +25,20 @@ interface EvalCase {
   mustNotContain?: string[];
   /** Knowledge files that should be retrieved for this question (retrieval metrics). */
   expectedSources?: string[];
+  /**
+   * Multi-turn cases: earlier user messages of the same conversation, run through the graph first
+   * (their turns become the short-term memory of `question`). Not scored themselves.
+   */
+  conversation?: string[];
+  /** Multi-turn cases: a fixed history instead of (or before) `conversation`. */
+  history?: ConversationTurn[];
+  /** The reply must not call any tool (e.g. a clarification instead of an invented id). */
+  mustNotCallTools?: boolean;
+  /** Strings the reply must not mention (e.g. an unrelated ticket a wrong follow-up would invent). */
+  mustNotMention?: string[];
 }
+
+const isMultiTurn = (c: EvalCase) => Boolean(c.conversation?.length || c.history?.length || c.mustNotCallTools);
 
 const pctOf = (value: number | undefined) => (value === undefined ? "n/a" : `${Math.round(100 * value)}%`);
 
@@ -90,8 +104,16 @@ async function main(): Promise<void> {
   try {
     for (const testCase of cases) {
       const threadId = `eval-${testCase.id}`;
+      // Setup turns of a multi-turn case build its history; they are excluded from the case stats.
+      let history: ConversationTurn[] = testCase.history ?? [];
+      for (const [i, prior] of (testCase.conversation ?? []).entries()) {
+        const priorThread = `${threadId}-turn-${i}`;
+        const before = history;
+        const priorTurn = await tracedTurn(tracer, priorThread, "ask", () => askAgent(graph, prior, priorThread, before));
+        history = [...history, toConversationTurn(prior, priorTurn)];
+      }
       const tracesBefore = tracer.summaries.length;
-      let turn = await tracedTurn(tracer, threadId, "ask", () => askAgent(graph, testCase.question, threadId));
+      let turn = await tracedTurn(tracer, threadId, "ask", () => askAgent(graph, testCase.question, threadId, history));
       const escalated = Boolean(turn.review);
       if (turn.review) turn = await tracedTurn(tracer, threadId, "resume", () => resumeAgent(graph, { approved: false, note: "eval" }, threadId));
       // An escalated case is two traces (ask + resume); count it as one request.
@@ -113,6 +135,12 @@ async function main(): Promise<void> {
         ms: caseSummary.durationMs,
         tokens: caseSummary.usageReported ? caseSummary.inputTokens + caseSummary.outputTokens : "n/a",
         injectionOk: testCase.mustNotContain ? injectionResisted([turn.state.answer, turn.state.draft], testCase.mustNotContain) : undefined,
+        multiTurnOk: isMultiTurn(testCase)
+          ? turn.state.route === testCase.expectedRoute &&
+            hits === testCase.expectedFacts.length &&
+            injectionResisted([turn.state.answer], testCase.mustNotMention ?? []) &&
+            (!testCase.mustNotCallTools || (turn.state.toolCalls ?? []).every((call) => call.fromMemory))
+          : undefined,
       });
     }
   } finally {
@@ -127,6 +155,7 @@ async function main(): Promise<void> {
   console.log(`Fact hit rate:       ${factRates.length ? `${Math.round((100 * factRates.reduce((a, b) => a + b, 0)) / factRates.length)}%` : "n/a"}`);
   console.log(`Correct "no sé":     ${pct(rows.flatMap((r) => (r.noSeOk === undefined ? [] : [r.noSeOk])))}`);
   console.log(`Injection resisted:  ${pct(rows.flatMap((r) => (r.injectionOk === undefined ? [] : [r.injectionOk])))}`);
+  console.log(`Follow-up / clarify: ${pct(rows.flatMap((r) => (r.multiTurnOk === undefined ? [] : [r.multiTurnOk])))} (route, facts, no invented ids, no tool call when a clarification is expected)`);
 
   const stats = computeStats(caseSummaries);
   const secs = (ms: number | undefined) => (ms === undefined ? "n/a" : `${(ms / 1000).toFixed(1)} s`);

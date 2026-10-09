@@ -2,6 +2,7 @@ import "dotenv/config";
 import { resolve } from "node:path";
 import { resolveLlmSettings, type LlmSettings } from "./llm.js";
 import { resolveCostRates, type CostRates } from "./observability/tracing.js";
+import { resolveMemoryTurns } from "./memory/conversation-memory.js";
 import { resolveAllowedLinkHosts } from "./security/guards.js";
 import { resolveConcurrency } from "./service/assistant-service.js";
 
@@ -19,8 +20,14 @@ export const config = {
   retrieval: { topK: 4, minScore: 0.82 },
   /** Output guard: replies may only link to these hosts and their subdomains (`ALLOWED_LINK_HOSTS`, comma-separated). */
   security: { allowedLinkHosts: resolveAllowedLinkHosts(process.env.ALLOWED_LINK_HOSTS) },
-  /** Background graph runs at once (`ASSISTANT_CONCURRENCY`, default 1). */
-  assistant: { concurrency: resolveConcurrency(process.env.ASSISTANT_CONCURRENCY) },
+  /**
+   * Background graph runs at once (`ASSISTANT_CONCURRENCY`, default 1) and turns of short-term
+   * memory kept per requester (`MEMORY_TURNS`, default 6; 0 disables it).
+   */
+  assistant: {
+    concurrency: resolveConcurrency(process.env.ASSISTANT_CONCURRENCY),
+    memoryTurns: resolveMemoryTurns(process.env.MEMORY_TURNS),
+  },
   mcp: {
     command: env("MCP_SERVER_COMMAND"),
     args: env("MCP_SERVER_ARGS")?.split(/\s+/) ?? [],

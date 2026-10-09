@@ -36,6 +36,15 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 
 `npm run eval` still calls the graph directly (sequentially), so eval numbers are unaffected by the queue.
 
+## Conversation memory (short-term)
+
+- The service keeps the last N completed turns per requester (`MEMORY_TURNS`, default 6; `0` disables it) behind the `ConversationMemory` interface (`src/memory/conversation-memory.ts`; in memory today, swappable for a persistent store). Each turn holds the user text, the route, the final answer and the structured tool results (e.g. the list of failed pipelines).
+- The CLI uses a single local requester id (`local`); the service API takes `submit(text, { requester })`. Requests without a requester get no memory.
+- Requests from the same requester run in order (the next one starts after the previous one completed or paused for approval); memory is appended only when a job completes, so a follow-up always sees finished turns. Different requesters still share the queue concurrency.
+- The history is passed to the router, to the tool-selection prompt and to the answer prompt as delimited untrusted context (`<conversacion>`): it helps interpret the current message, never replaces the docs as the source of facts.
+- **Follow-up references** ("el primero que me pasaste", "el segundo pipeline", "ese ticket") are resolved deterministically (`src/memory/references.ts`) against the latest matching tool result. A resolved pipeline item is summarized from the stored result (no new tool call); a resolved ticket is refreshed with `get_ticket` using its real key. A follow-up that asks to change the referenced item is checked by the safety net together with the resolved label.
+- **Never guess**: when a reference cannot be resolved to exactly one item (no history, several candidates, out of range), the router returns the deterministic `clarify` route: a short clarification question, no model call and no tool call. Independently, the task node refuses to call `get_ticket` with a key that appears neither in the message nor in the history (outcome `clarify`).
+
 ## Observability and cost
 
 - One trace per graph step (`tracedTurn`): root span `invoke_agent suplente-digital`, child spans per node (`node <name>`), per model call (`chat <model>`) and per tool call (`execute_tool <tool>`). Spans propagate through `AsyncLocalStorage`, so nodes and the `Llm` contract are unchanged.
@@ -53,6 +62,7 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 | `task` | Live operational info (tickets, pipelines) | Model picks one read-only tool (validated with zod); result summarized |
 | `sensitive` | Irreversible, permissioned or secret-related | Draft reply → `interrupt` → human approves/rejects → logged |
 | `out_of_scope` | Unrelated to the team | Polite decline, no further model calls |
+| `clarify` | Follow-up reference that cannot be resolved from the conversation (deterministic, before the LLM router) | Short clarification question; no model or tool call |
 
 The router is an LLM classifier with a deterministic safety net (`detectSensitive`): matching requests are forced to `sensitive` even if the model disagrees. Unparseable router output falls back to `question`, which can only answer from docs.
 
@@ -99,15 +109,17 @@ Threat model and residual risks: [`security.md`](security.md).
 - [x] Everything runs without credentials except the LLM calls (mock tools, local embeddings).
 - [x] Every request gets an instant acknowledgement (no model call); results, approval requests and failures arrive later as events tagged with the request number.
 - [x] CI runs typecheck and unit tests on every push and pull request (Node 22.12 and 24), without LLM calls, network-dependent tests or secrets.
+- [x] Follow-ups resolve against the requester's recent tool results; unresolvable references get a clarification question, never a tool call with an invented id.
 - [x] Unit tests cover chunking, ranking, router parsing, safety net, pending store/summary, tools, graph flows and the assistant service (ack, queue limit, done / failed / approval flows) with a fake LLM or fake graph.
 
 ## Eval plan
 
-`evals/questions.json` holds 17 cases (answerable, must-say-"no sé", tasks, sensitive, out-of-scope, and 3 adversarial prompt-injection cases). `npm run eval` runs them through the real graph (configured LLM — local OpenAI-compatible model by default or Claude — + local embeddings + mock tools, isolated pending log; escalations auto-rejected) and reports:
+`evals/questions.json` holds 19 cases (answerable, must-say-"no sé", tasks, sensitive, out-of-scope, 3 adversarial prompt-injection cases and 2 multi-turn cases). A multi-turn case lists earlier user messages in `conversation` (run through the graph first; their turns become the history) or a fixed `history`; `mustNotCallTools` and `mustNotMention` check that a follow-up never invents an id. `npm run eval` runs them through the real graph (configured LLM — local OpenAI-compatible model by default or Claude — + local embeddings + mock tools, isolated pending log; escalations auto-rejected) and reports:
 
 - **Route accuracy** — router decision vs expected route.
 - **Fact hit rate** — expected key facts found in the reply body (sources excluded).
 - **Correct "no sé"** — unknown questions declined, answerable questions answered.
+- **Follow-up / clarify** — multi-turn cases with the right route and facts, no forbidden mention (e.g. an unrelated ticket) and no tool call when a clarification is expected.
 - **Injection resisted** — adversarial cases whose reply and draft contain none of their `mustNotContain` strings (canary `CANARY-7Q2X`, exfiltration host, prompt fragments, claims of a write action).
 
 Before generation, a retriever-only pass ranks the whole index (no `minScore` cut-off) for every case with `expectedSources` and reports:

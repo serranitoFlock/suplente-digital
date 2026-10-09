@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DRAFT_PROMPT } from "../src/graph/escalate.js";
 import { buildGraph, type AgentTurn } from "../src/graph/graph.js";
 import { ROUTER_PROMPT } from "../src/graph/router.js";
-import type { ReviewDecision, State } from "../src/graph/state.js";
+import type { ConversationTurn, ReviewDecision, State } from "../src/graph/state.js";
+import { InMemoryConversationMemory } from "../src/memory/conversation-memory.js";
 import type { Llm } from "../src/llm.js";
 import { PendingStore } from "../src/pending/store.js";
 import { Retriever } from "../src/rag/retriever.js";
@@ -38,24 +39,28 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-const answered = (answer: string, route: State["route"] = "question"): AgentTurn => ({
-  state: { question: "", route, topic: "t", routeReason: "", answer, sources: [], draft: "", outcome: "answered" },
+const baseState = { history: [], reference: { kind: "none" as const }, toolCalls: [] };
+
+const answered = (answer: string, route: State["route"] = "question", toolCalls: State["toolCalls"] = []): AgentTurn => ({
+  state: { ...baseState, question: "", route, topic: "t", routeReason: "", answer, sources: [], draft: "", outcome: "answered", toolCalls },
 });
 
 const needsReview = (draft: string): AgentTurn => ({
-  state: { question: "", route: "sensitive", topic: "t", routeReason: "", answer: "", sources: [], draft, outcome: undefined as never },
+  state: { ...baseState, question: "", route: "sensitive", topic: "t", routeReason: "", answer: "", sources: [], draft, outcome: undefined as never },
   review: { question: "q", draft },
 });
 
 /** Fake graph: every ask/resume waits on a deferred the test controls. */
 class ControlledRunner implements AgentRunner {
   readonly asks = new Map<string, Deferred<AgentTurn>>();
+  readonly histories = new Map<string, ConversationTurn[] | undefined>();
   readonly resumes: { threadId: string; decision: ReviewDecision }[] = [];
   resumeTurn: (decision: ReviewDecision) => AgentTurn = (d) => answered(d.approved ? "aprobado" : "rechazado", "sensitive");
   active = 0;
   maxActive = 0;
 
-  ask(question: string, threadId: string): Promise<AgentTurn> {
+  ask(question: string, threadId: string, history?: ConversationTurn[]): Promise<AgentTurn> {
+    this.histories.set(question, history);
     const d = deferred<AgentTurn>();
     this.asks.set(question, d);
     this.active++;
@@ -191,6 +196,68 @@ describe("AssistantService", () => {
     expect(runner.resumes[0]?.decision).toEqual({ approved: false, note: "esperar" });
     expect(service.reject(999)).toBe("not_found");
     expect(service.approve(id)).toBe("not_pending");
+  });
+});
+
+describe("AssistantService conversation memory", () => {
+  it("passes the requester's previous turns (with tool results) to the next request", async () => {
+    const runner = new ControlledRunner();
+    const service = new AssistantService(runner);
+    const toolCalls = [{ tool: "list_failed_pipelines", args: { sinceDays: 7 }, readOnly: true, result: [{ pipeline: "acme-card-elements" }] }];
+    service.submit("¿Qué pipelines fallaron?", { requester: "ana" });
+    await runner.release("¿Qué pipelines fallaron?", answered("Falló acme-card-elements.", "task", toolCalls));
+    await service.idle();
+
+    service.submit("¿y el primero?", { requester: "ana" });
+    service.submit("¿y el primero? (beto)", { requester: "beto" });
+    await runner.release("¿y el primero?", answered("ok"));
+    await runner.release("¿y el primero? (beto)", answered("ok"));
+    await service.idle();
+    expect(runner.histories.get("¿Qué pipelines fallaron?")).toEqual([]);
+    expect(runner.histories.get("¿y el primero?")).toEqual([
+      { question: "¿Qué pipelines fallaron?", route: "task", answer: "Falló acme-card-elements.", toolResults: toolCalls },
+    ]);
+    expect(runner.histories.get("¿y el primero? (beto)")).toEqual([]);
+  });
+
+  it("runs requests from the same requester in order, even with spare concurrency", async () => {
+    const runner = new ControlledRunner();
+    const service = new AssistantService(runner, { concurrency: 3, memory: new InMemoryConversationMemory(6) });
+    service.submit("a1", { requester: "ana" });
+    service.submit("a2", { requester: "ana" });
+    service.submit("b1", { requester: "beto" });
+
+    await waitFor(() => runner.asks.has("a1") && runner.asks.has("b1"));
+    expect(runner.asks.has("a2")).toBe(false);
+    expect(service.status(2)?.status).toBe("queued");
+
+    await runner.release("a1", answered("r1"));
+    await waitFor(() => runner.asks.has("a2"));
+    expect(runner.histories.get("a2")?.map((t) => t.question)).toEqual(["a1"]);
+    await runner.release("a2", answered("r2"));
+    await runner.release("b1", answered("rb"));
+    await service.idle();
+    expect(service.list().every((job) => job.status === "done")).toBe(true);
+  });
+
+  it("does not block a requester's next request while an earlier one waits for approval", async () => {
+    const runner = new ControlledRunner();
+    const service = new AssistantService(runner);
+    const approval = nextEvent(service, "needs_approval");
+    service.submit("Borrá la rama", { requester: "ana" });
+    await runner.release("Borrá la rama", needsReview("Borrador"));
+    await approval;
+    service.submit("¿Cómo publico?", { requester: "ana" });
+    await waitFor(() => runner.asks.has("¿Cómo publico?"));
+  });
+
+  it("keeps anonymous requests independent (no memory, no ordering)", async () => {
+    const runner = new ControlledRunner();
+    const service = new AssistantService(runner, { concurrency: 2 });
+    service.submit("x1");
+    service.submit("x2");
+    await waitFor(() => runner.asks.has("x1") && runner.asks.has("x2"));
+    expect(runner.histories.get("x2")).toEqual([]);
   });
 });
 

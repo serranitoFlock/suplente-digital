@@ -7,9 +7,10 @@ import { computeStats, renderStats } from "./observability/stats.js";
 import { JsonlTraceExporter, Tracer } from "./observability/tracing.js";
 import { PendingStore } from "./pending/store.js";
 import { renderWelcomeBack } from "./pending/summary.js";
+import { InMemoryConversationMemory } from "./memory/conversation-memory.js";
 import { LocalE5Embedder } from "./rag/embeddings.js";
 import { Retriever } from "./rag/retriever.js";
-import { AssistantService, graphRunner, type DecisionResult } from "./service/assistant-service.js";
+import { AssistantService, DEFAULT_REQUESTER, graphRunner, type DecisionResult } from "./service/assistant-service.js";
 import { createToolProvider } from "./tools/mcp-provider.js";
 
 async function main(): Promise<void> {
@@ -30,7 +31,11 @@ async function main(): Promise<void> {
     pending,
     allowedLinkHosts: config.security.allowedLinkHosts,
   });
-  const service = new AssistantService(graphRunner(graph, tracer), { concurrency: config.assistant.concurrency, threadPrefix: `cli-${Date.now()}` });
+  const service = new AssistantService(graphRunner(graph, tracer), {
+    concurrency: config.assistant.concurrency,
+    threadPrefix: `cli-${Date.now()}`,
+    memory: new InMemoryConversationMemory(config.assistant.memoryTurns),
+  });
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "vos> " });
   let closing = false;
 
@@ -66,7 +71,8 @@ async function main(): Promise<void> {
       case "empty":
         break;
       case "ask":
-        print(`suplente> ${service.submit(command.text).ack}`);
+        // The CLI has a single local user, so the whole session is one conversation.
+        print(`suplente> ${service.submit(command.text, { requester: DEFAULT_REQUESTER }).ack}`);
         return;
       case "approve":
         print(decisionMessage(command.id, service.approve(command.id, command.note), "aprobada"));

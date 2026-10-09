@@ -2,9 +2,9 @@ import { Command, END, isGraphInterrupt, MemorySaver, START, StateGraph, type Ba
 import { withSpan, type Tracer } from "../observability/tracing.js";
 import type { ToolProvider } from "../tools/types.js";
 import { makeAnswerNode } from "./answer.js";
-import { makeDraftNode, makeHumanReviewNode, outOfScopeNode } from "./escalate.js";
+import { clarifyNode, makeDraftNode, makeHumanReviewNode, outOfScopeNode } from "./escalate.js";
 import { makeRouterNode } from "./router.js";
-import { AgentState, type GraphDeps, type ReviewDecision, type ReviewRequest, type State } from "./state.js";
+import { AgentState, type ConversationTurn, type GraphDeps, type ReviewDecision, type ReviewRequest, type State } from "./state.js";
 import { makeTaskNode } from "./task.js";
 
 /** Wraps a graph node in a span; a LangGraph interrupt (human review pause) is control flow, not an error. */
@@ -34,18 +34,21 @@ export function buildGraph(deps: GraphDeps, checkpointer: BaseCheckpointSaver = 
     .addNode("draft_escalation", traced("draft_escalation", makeDraftNode(nodeDeps)))
     .addNode("human_review", traced("human_review", makeHumanReviewNode(nodeDeps)))
     .addNode("out_of_scope", traced("out_of_scope", outOfScopeNode))
+    .addNode("clarify", traced("clarify", clarifyNode))
     .addEdge(START, "router")
     .addConditionalEdges("router", (state) => state.route, {
       question: "rag_answer",
       task: "run_task",
       sensitive: "draft_escalation",
       out_of_scope: "out_of_scope",
+      clarify: "clarify",
     })
     .addEdge("draft_escalation", "human_review")
     .addEdge("rag_answer", END)
     .addEdge("run_task", END)
     .addEdge("human_review", END)
     .addEdge("out_of_scope", END)
+    .addEdge("clarify", END)
     .compile({ checkpointer });
 }
 
@@ -65,8 +68,9 @@ async function readTurn(graph: AgentGraph, threadId: string): Promise<AgentTurn>
   return { state: snapshot.values as State, review: pendingInterrupt?.value as ReviewRequest | undefined };
 }
 
-export async function askAgent(graph: AgentGraph, question: string, threadId: string): Promise<AgentTurn> {
-  await graph.invoke({ question }, threadConfig(threadId));
+/** Runs a new question; `history` holds the requester's recent turns (short-term memory). */
+export async function askAgent(graph: AgentGraph, question: string, threadId: string, history: ConversationTurn[] = []): Promise<AgentTurn> {
+  await graph.invoke({ question, history }, threadConfig(threadId));
   return readTurn(graph, threadId);
 }
 

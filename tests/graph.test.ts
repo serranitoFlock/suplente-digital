@@ -11,8 +11,40 @@ import type { Llm } from "../src/llm.js";
 import { PendingStore } from "../src/pending/store.js";
 import { buildIndexFromDocs } from "../src/rag/ingest.js";
 import { Retriever, type VectorIndex } from "../src/rag/retriever.js";
+import type { ConversationTurn } from "../src/graph/state.js";
 import { MockToolProvider } from "../src/tools/mock-provider.js";
+import type { ToolCall, ToolProvider } from "../src/tools/types.js";
 import { FakeEmbedder } from "./helpers/fake-embedder.js";
+
+const pipelineHistory: ConversationTurn[] = [
+  {
+    question: "no me están funcionando los pipelines",
+    route: "task",
+    answer: "Fallaron acme-card-elements, acme-ui-kit y acme-shell.",
+    toolResults: [
+      {
+        tool: "list_failed_pipelines",
+        args: { sinceDays: 7 },
+        readOnly: true,
+        result: [
+          { pipeline: "acme-card-elements", job: "build:elements", reason: "input 'variant' no existe" },
+          { pipeline: "acme-ui-kit", job: "test:unit", reason: "zona horaria" },
+        ],
+      },
+    ],
+  },
+];
+
+/** Records every tool call so tests can assert that no id was invented. */
+class RecordingTools implements ToolProvider {
+  readonly name = "recording";
+  readonly calls: ToolCall[] = [];
+  readonly #inner = new MockToolProvider();
+  call(call: ToolCall): Promise<string> {
+    this.calls.push(call);
+    return this.#inner.call(call);
+  }
+}
 
 interface Script {
   route: string;
@@ -153,5 +185,90 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
     const { state } = await askAgent(graph, "¿Qué película me recomendás?", "t7");
     expect(state.outcome).toBe("out_of_scope");
     expect(calls).toEqual(["router"]);
+  });
+
+  describe("conversation memory and follow-ups", () => {
+    const followUpGraph = (route: string, tool: string | undefined, tools: ToolProvider, seen: string[]) =>
+      buildGraph({
+        llm: async (system, user) => {
+          if (system === ROUTER_PROMPT) {
+            seen.push(`router:${user}`);
+            return JSON.stringify({ route, topic: "pipelines", reason: "test" });
+          }
+          if (system === TOOL_SELECTION_PROMPT) {
+            seen.push("tool_selection");
+            return tool ?? '{"tool":"none"}';
+          }
+          if (system === TOOL_SUMMARY_PROMPT) {
+            seen.push(`summary:${user}`);
+            return "Falló build:elements en acme-card-elements.";
+          }
+          if (system === DRAFT_PROMPT) return "Borrador: lo hace una persona.";
+          throw new Error("unexpected prompt");
+        },
+        retriever: new Retriever(index, embedder, { topK: 2, minScore: 0.3 }),
+        tools,
+        pending,
+      });
+
+    it('resolves "el primero que me pasaste" against the previous tool result without calling a tool', async () => {
+      const seen: string[] = [];
+      const tools = new RecordingTools();
+      const graph = followUpGraph("question", undefined, tools, seen);
+      const { state } = await askAgent(graph, "es sobre el primero que me pasaste, que paso?", "m1", pipelineHistory);
+      expect(state.route).toBe("task");
+      expect(tools.calls).toEqual([]);
+      expect(seen).not.toContain("tool_selection");
+      expect(seen.find((s) => s.startsWith("router:"))).toMatch(/Conversación reciente[\s\S]*acme-card-elements/);
+      expect(seen.find((s) => s.startsWith("summary:"))).toContain("acme-card-elements");
+      expect(state.answer).toContain("Basado en el resultado anterior de list_failed_pipelines");
+      expect(state.answer).not.toContain("DEMO-101");
+      expect(state.toolCalls).toMatchObject([{ fromMemory: true, result: [{ pipeline: "acme-card-elements" }] }]);
+    });
+
+    it("asks for clarification instead of guessing when there is no history", async () => {
+      const seen: string[] = [];
+      const tools = new RecordingTools();
+      const graph = followUpGraph("task", '{"tool":"get_ticket","args":{"key":"DEMO-101"}}', tools, seen);
+      const { state } = await askAgent(graph, "es sobre el primero que me pasaste, que paso?", "m2");
+      expect(state.route).toBe("clarify");
+      expect(state.outcome).toBe("clarify");
+      expect(state.answer).toMatch(/¿Puedes indicarme/);
+      expect(seen).toEqual([]);
+      expect(tools.calls).toEqual([]);
+    });
+
+    it("never calls get_ticket with a key the requester did not give", async () => {
+      const seen: string[] = [];
+      const tools = new RecordingTools();
+      const graph = followUpGraph("task", '{"tool":"get_ticket","args":{"key":"DEMO-101"}}', tools, seen);
+      const { state } = await askAgent(graph, "¿Cómo viene el ticket del CDN?", "m3");
+      expect(state.outcome).toBe("clarify");
+      expect(tools.calls).toEqual([]);
+    });
+
+    it("refreshes a referenced ticket with its real key", async () => {
+      const seen: string[] = [];
+      const tools = new RecordingTools();
+      const graph = followUpGraph("task", undefined, tools, seen);
+      const history: ConversationTurn[] = [
+        { question: "buscá tickets del cdn", route: "task", answer: "DEMO-102", toolResults: [{ tool: "search_tickets", args: { query: "cdn" }, readOnly: true, result: [{ key: "DEMO-102", summary: "acme-header no carga" }] }] },
+      ];
+      const { state } = await askAgent(graph, "¿Y ese ticket en qué quedó?", "m4", history);
+      expect(tools.calls).toEqual([{ tool: "get_ticket", args: { key: "DEMO-102" } }]);
+      expect(state.toolCalls).toMatchObject([{ tool: "get_ticket", readOnly: true, result: { key: "DEMO-102", status: "En progreso" } }]);
+    });
+
+    it("escalates a follow-up that asks to change the referenced ticket", async () => {
+      const seen: string[] = [];
+      const tools = new RecordingTools();
+      const history: ConversationTurn[] = [
+        { question: "buscá tickets del cdn", route: "task", answer: "DEMO-102", toolResults: [{ tool: "search_tickets", args: { query: "cdn" }, readOnly: true, result: [{ key: "DEMO-102", summary: "acme-header no carga" }] }] },
+      ];
+      const { state, review } = await askAgent(followUpGraph("task", undefined, tools, seen), "cerrá ese ticket", "m5", history);
+      expect(state.route).toBe("sensitive");
+      expect(review).toBeDefined();
+      expect(tools.calls).toEqual([]);
+    });
   });
 });

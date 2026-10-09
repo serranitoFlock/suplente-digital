@@ -1,7 +1,8 @@
 import type { Llm } from "../llm.js";
+import { renderHistory } from "../memory/conversation-memory.js";
 import type { ScoredChunk } from "../rag/retriever.js";
 import { sanitizeOutput, wrapUntrusted } from "../security/guards.js";
-import { NO_ANSWER, type GraphDeps, type Source, type State, type Update } from "./state.js";
+import { NO_ANSWER, type ConversationTurn, type GraphDeps, type Source, type State, type Update } from "./state.js";
 
 const NO_ANSWER_TOKEN = "NO_SE";
 
@@ -39,7 +40,7 @@ export function makeAnswerNode({ llm, retriever, pending, allowedLinkHosts }: Pi
     const chunks = await retriever.retrieve(state.question);
     if (chunks.length === 0) return unknown(state);
 
-    const reply = sanitizeOutput((await answerFromContext(llm, state.question, chunks)).trim(), allowedLinkHosts);
+    const reply = sanitizeOutput((await answerFromContext(llm, state.question, chunks, state.history ?? [])).trim(), allowedLinkHosts);
     if (!reply || reply.includes(NO_ANSWER_TOKEN)) return unknown(state);
 
     const sources = chunks.map(({ source, heading, score }) => ({ source, heading, score }));
@@ -47,6 +48,8 @@ export function makeAnswerNode({ llm, retriever, pending, allowedLinkHosts }: Pi
   };
 }
 
-function answerFromContext(llm: Llm, question: string, chunks: ScoredChunk[]): Promise<string> {
-  return llm(ANSWER_PROMPT, `Documentos:\n${formatContext(chunks)}\n\nPregunta: ${question}`);
+function answerFromContext(llm: Llm, question: string, chunks: ScoredChunk[], history: ConversationTurn[]): Promise<string> {
+  // Earlier turns only help interpret the question; facts must still come from the documents.
+  const context = history.length > 0 ? `Conversación reciente (solo para entender la pregunta):\n${wrapUntrusted("conversacion", renderHistory(history), {})}\n\n` : "";
+  return llm(ANSWER_PROMPT, `${context}Documentos:\n${formatContext(chunks)}\n\nPregunta: ${question}`);
 }
