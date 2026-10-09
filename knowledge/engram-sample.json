@@ -1,0 +1,150 @@
+{
+  "version": "0.2.0",
+  "exported_at": "2026-06-30 18:00:00.000000000",
+  "sessions": [
+    { "id": "sess-acme-shell-01", "project": "acme-shell", "ownership_mode": "owner", "directory": "/home/dev/acme-shell", "started_at": "2026-02-11 09:30:00", "ended_at": "2026-02-11 12:00:00" },
+    { "id": "sess-acme-shell-02", "project": "acme-shell", "ownership_mode": "owner", "directory": "/home/dev/acme-shell", "started_at": "2026-06-02 14:00:00", "ended_at": "2026-06-02 18:10:00" },
+    { "id": "sess-acme-ui-kit-01", "project": "acme-ui-kit", "ownership_mode": "owner", "directory": "/home/dev/acme-ui-kit", "started_at": "2026-04-15 10:00:00", "ended_at": "2026-04-15 13:30:00" }
+  ],
+  "observations": [
+    {
+      "id": 9101, "sync_id": "obs-acme-9101", "session_id": "sess-acme-shell-01", "type": "decision",
+      "title": "Timeout de carga de web components en el shell",
+      "content": "**What**: El shell espera 30 segundos a que cargue el bundle de un web component y no muestra ningún fallback.\n**Why**: valor por defecto heredado del loader original.\n**Where**: `src/app/loader/wc-loader.ts`.",
+      "project": "acme-shell", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-02-11 10:00:00", "review_after": "2026-08-11 10:00:00",
+      "created_at": "2026-02-11 10:00:00", "updated_at": "2026-02-11 10:00:00", "pinned": false,
+      "topic_key": "shell/wc-load-timeout"
+    },
+    {
+      "id": 9102, "sync_id": "obs-acme-9102", "session_id": "sess-acme-shell-02", "type": "decision",
+      "title": "Timeout de carga de web components en el shell",
+      "content": "**What**: El shell corta la carga de un web component a los 8 segundos y muestra el fallback `acme-error-boundary`.\n**Why**: la pantalla quedaba en blanco demasiado tiempo y los usuarios recargaban; 8 segundos cubre el p99 de carga medido en QA.\n**Where**: `src/app/loader/wc-loader.ts` (constante `WC_LOAD_TIMEOUT_MS`).\n**Learned**: cada vencimiento reporta el evento `wc_load_timeout` para medir cuántas veces pasa.",
+      "project": "acme-shell", "scope": "project", "revision_count": 2, "duplicate_count": 0,
+      "last_seen_at": "2026-06-02 15:20:00", "review_after": "2026-12-02 15:20:00",
+      "created_at": "2026-06-02 15:20:00", "updated_at": "2026-06-02 15:20:00", "pinned": false,
+      "topic_key": "shell/wc-load-timeout"
+    },
+    {
+      "id": 9103, "sync_id": "obs-acme-9103", "session_id": "sess-acme-ui-kit-01", "type": "bugfix",
+      "title": "Estilos duplicados de acme-button en Safari",
+      "content": "**What**: En Safari los estilos de `acme-button` se aplicaban dos veces cuando dos micro-frontends registraban el mismo componente.\n**Why**: cada bundle llamaba a `customElements.define` sin verificar; el segundo registro fallaba a medias y duplicaba los `adoptedStyleSheets`.\n**Where**: `projects/ui-kit/src/define.ts`.\n**Learned**: chequear siempre `customElements.get(tag)` antes de `define`. Corregido en `@acme/ui-kit` 4.2.1.",
+      "project": "acme-ui-kit", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-04-15 11:00:00", "review_after": "2026-10-15 11:00:00",
+      "created_at": "2026-04-15 11:00:00", "updated_at": "2026-04-15 11:00:00", "pinned": false,
+      "topic_key": "bugfix/acme-button-safari-styles"
+    },
+    {
+      "id": 9104, "sync_id": "obs-acme-9104", "session_id": "sess-acme-shell-02", "type": "config",
+      "title": "Feature flags del shell",
+      "content": "**What**: Los feature flags del shell se leen de `flags.json`, publicado en el CDN por ambiente.\n**Why**: prender o apagar una funcionalidad no tiene que requerir un deploy del shell.\n**Where**: `https://cdn.example.com/config/<ambiente>/flags.json`; el shell lo cachea 5 minutos.\n**Learned**: para apagar una funcionalidad en QA alcanza con editar el flag y esperar que venza el caché.",
+      "project": "acme-shell", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-06-02 16:00:00", "review_after": "2026-12-02 16:00:00",
+      "created_at": "2026-06-02 16:00:00", "updated_at": "2026-06-02 16:00:00", "pinned": false,
+      "topic_key": "config/shell-feature-flags"
+    },
+    {
+      "id": 9105, "sync_id": "obs-acme-9105", "session_id": "sess-acme-ui-kit-01", "type": "pattern",
+      "title": "Comunicación entre web components y el shell",
+      "content": "**What**: Los web components avisan al shell con `CustomEvent` y las opciones `bubbles: true, composed: true`.\n**Why**: `composed` deja que el evento cruce el shadow DOM y llegue al shell.\n**Where**: helper `emitAcmeEvent` de `@acme/ui-kit`.",
+      "project": "acme-ui-kit", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-04-15 12:00:00", "review_after": "2026-10-15 12:00:00",
+      "created_at": "2026-04-15 12:00:00", "updated_at": "2026-04-15 12:00:00", "pinned": false,
+      "topic_key": ""
+    },
+    {
+      "id": 9106, "sync_id": "obs-acme-9106", "session_id": "sess-acme-shell-02", "type": "discovery",
+      "title": "La vista del shell no se actualiza con eventos de un web component",
+      "content": "**What**: Cambios de estado disparados desde listeners de eventos de un web component no actualizaban la vista del shell.\n**Why**: el listener corría fuera de la zona de Angular.\n**Learned**: envolver el handler en `NgZone.run` o pasar ese estado a signals.",
+      "project": "acme-shell", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-06-02 17:00:00", "review_after": "2026-12-02 17:00:00",
+      "created_at": "2026-06-02 17:00:00", "updated_at": "2026-06-02 17:00:00", "pinned": false,
+      "topic_key": ""
+    },
+    {
+      "id": 9107, "sync_id": "obs-acme-9107", "session_id": "sess-acme-shell-01", "type": "architecture",
+      "title": "Estado compartido entre micro-frontends",
+      "content": "**What**: No hay store global; el estado compartido entre micro-frontends viaja por atributos del web component y por eventos.\n**Why**: un store global obligaba a alinear versiones de todos los micro-frontends en cada release.\n**Where**: guía de arquitectura del shell.",
+      "project": "acme-shell", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-02-11 11:00:00", "review_after": "2026-08-11 11:00:00",
+      "created_at": "2026-02-11 11:00:00", "updated_at": "2026-02-11 11:00:00", "pinned": false,
+      "topic_key": "architecture/shared-state"
+    },
+    {
+      "id": 9108, "sync_id": "obs-acme-9108", "session_id": "sess-acme-ui-kit-01", "type": "learning",
+      "title": "Tests de componentes asociados a formularios",
+      "content": "**What**: happy-dom no implementa `ElementInternals` completo, así que los tests de componentes asociados a formularios (form-associated) fallan en Vitest.\n**Learned**: esos tests corren en Playwright component testing; el resto de los tests unitarios sigue en Vitest con happy-dom.",
+      "project": "acme-ui-kit", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-04-15 13:00:00", "review_after": "2026-10-15 13:00:00",
+      "created_at": "2026-04-15 13:00:00", "updated_at": "2026-04-15 13:00:00", "pinned": false,
+      "topic_key": "testing/form-associated-components"
+    },
+    {
+      "id": 9109, "sync_id": "obs-acme-9109", "session_id": "sess-acme-shell-02", "type": "session_summary",
+      "title": "Resumen de sesión acme-shell",
+      "content": "## Goal\nAjustar el timeout del loader.\n\n## Accomplished\n- Timeout del loader cambiado.\n\n## Next Steps\n- Revisar métricas la semana que viene.",
+      "project": "acme-shell", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-06-02 18:10:00", "review_after": "2026-12-02 18:10:00",
+      "created_at": "2026-06-02 18:10:00", "updated_at": "2026-06-02 18:10:00", "pinned": false,
+      "topic_key": ""
+    },
+    {
+      "id": 9110, "sync_id": "obs-acme-9110", "session_id": "sess-acme-ui-kit-01", "type": "passive",
+      "title": "Aprendizajes capturados automáticamente",
+      "content": "1. El build de acme-ui-kit tarda unos 40 segundos en la máquina de desarrollo.",
+      "project": "acme-ui-kit", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-04-15 13:30:00", "review_after": "2026-10-15 13:30:00",
+      "created_at": "2026-04-15 13:30:00", "updated_at": "2026-04-15 13:30:00", "pinned": false,
+      "topic_key": ""
+    },
+    {
+      "id": 9111, "sync_id": "obs-acme-9111", "session_id": "sess-acme-shell-02", "type": "decision",
+      "title": "Preferencias personales de revisión",
+      "content": "**What**: Reviso merge requests los martes y jueves a la tarde; los viernes no apruebo deploys.\n**Why**: preferencia personal.",
+      "project": "acme-shell", "scope": "personal", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-06-02 17:30:00", "review_after": "2026-12-02 17:30:00",
+      "created_at": "2026-06-02 17:30:00", "updated_at": "2026-06-02 17:30:00", "pinned": false,
+      "topic_key": "personal/review-days"
+    },
+    {
+      "id": 9112, "sync_id": "obs-acme-9112", "session_id": "sess-acme-ui-kit-01", "type": "bugfix",
+      "title": "Fix temporal de z-index en acme-modal",
+      "content": "**What**: `acme-modal` usa `z-index: 9999` como parche temporal.\n**Why**: se superponía con el header del shell.",
+      "project": "acme-ui-kit", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-04-15 12:30:00", "review_after": "2026-10-15 12:30:00",
+      "created_at": "2026-04-15 12:30:00", "updated_at": "2026-04-15 12:30:00", "pinned": false,
+      "topic_key": "", "deleted_at": "2026-05-01 09:00:00"
+    },
+    {
+      "id": 9113, "sync_id": "obs-acme-9113", "session_id": "sess-acme-shell-02", "type": "config",
+      "title": "Token de lectura del registry",
+      "content": "**What**: Para pruebas locales se usó el token sk-ABCDEFGHIJKLMNOPQRSTUVWX (falso, solo para el ejemplo).\n**Where**: variable de entorno local.",
+      "project": "acme-shell", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-06-02 16:30:00", "review_after": "2026-12-02 16:30:00",
+      "created_at": "2026-06-02 16:30:00", "updated_at": "2026-06-02 16:30:00", "pinned": false,
+      "topic_key": ""
+    },
+    {
+      "id": 9114, "sync_id": "obs-acme-9114", "session_id": "sess-acme-ui-kit-01", "type": "pattern",
+      "title": "Comunicación entre web components y el shell (versión inicial)",
+      "content": "**What**: Los web components avisan al shell con `window.postMessage`.\n**Why**: era lo más rápido de implementar.",
+      "project": "acme-ui-kit", "scope": "project", "revision_count": 1, "duplicate_count": 0,
+      "last_seen_at": "2026-04-15 10:30:00", "review_after": "2026-10-15 10:30:00",
+      "created_at": "2026-04-15 10:30:00", "updated_at": "2026-04-15 10:30:00", "pinned": false,
+      "topic_key": ""
+    }
+  ],
+  "prompts": null,
+  "relations": [
+    {
+      "sync_id": "rel-acme-1", "source_id": "obs-acme-9105", "target_id": "obs-acme-9114", "relation": "supersedes",
+      "reason": "El patrón con CustomEvent reemplaza al de postMessage.", "confidence": 0.95, "judgment_status": "judged",
+      "marked_by_actor": "agent", "marked_by_kind": "agent", "created_at": "2026-04-15 12:00:00", "updated_at": "2026-04-15 12:00:00"
+    },
+    {
+      "sync_id": "rel-acme-2", "source_id": "obs-acme-9106", "target_id": "obs-acme-9105", "relation": "related",
+      "reason": "Ambas tratan eventos entre web components y el shell.", "confidence": 0.8, "judgment_status": "judged",
+      "marked_by_actor": "agent", "marked_by_kind": "agent", "created_at": "2026-06-02 17:00:00", "updated_at": "2026-06-02 17:00:00"
+    }
+  ]
+}

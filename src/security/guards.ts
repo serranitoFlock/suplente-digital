@@ -59,6 +59,11 @@ export function sanitizeOutput(text: string, allowedHosts: readonly string[] = D
   return out;
 }
 
+/** True when the text contains one of the token formats `sanitizeOutput` redacts (used to keep such notes out of the index). */
+export function containsSecret(text: string): boolean {
+  return SECRET_FORMATS.some((pattern) => new RegExp(pattern.source).test(text));
+}
+
 /** Parses `ALLOWED_LINK_HOSTS` (comma-separated); falls back to the default allowlist. */
 export function resolveAllowedLinkHosts(raw: string | undefined): string[] {
   const hosts = (raw ?? "")

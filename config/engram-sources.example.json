@@ -1,0 +1,4 @@
+{
+  "projects": ["acme-shell", "acme-ui-kit"],
+  "types": ["decision", "architecture", "pattern", "config", "discovery", "bugfix", "learning"]
+}

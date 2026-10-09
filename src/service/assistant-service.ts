@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { askAgent, resumeAgent, tracedTurn, type AgentGraph, type AgentTurn } from "../graph/graph.js";
 import type { Tracer } from "../observability/tracing.js";
 import { detectSensitive } from "../graph/router.js";
+import { sourceLabel } from "../graph/citations.js";
 import type { ConversationTurn, ReviewDecision, Route } from "../graph/state.js";
 import { InMemoryConversationMemory, toConversationTurn, type ConversationMemory } from "../memory/conversation-memory.js";
 import { summarizeToolResult, type ConversationLogSink, type LogOutcome, type NewLogEntry } from "../logging/conversation-log.js";
@@ -322,7 +323,7 @@ function turnLogFields(turn: AgentTurn): Partial<NewLogEntry> {
   const { state, trace } = turn;
   return {
     route: state.route,
-    citedSources: (state.citedSources ?? []).map((s) => `${s.source} › ${s.heading}`),
+    citedSources: (state.citedSources ?? []).map(sourceLabel),
     toolCalls: (state.toolCalls ?? []).map((call) => ({
       name: call.tool,
       args: call.args,

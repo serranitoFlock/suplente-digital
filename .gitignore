@@ -11,3 +11,6 @@ models/
 *.onnx
 coverage/
 .DS_Store
+# Local Engram allowlist and real exports (may hold client data; never commit)
+config/*.local.json
+data/engram/

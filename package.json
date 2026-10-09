@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "tsx src/cli.ts",
     "ingest": "tsx src/rag/ingest.ts",
+    "engram:export": "tsx src/rag/engram-export.ts",
     "summary": "tsx src/pending/summary.ts",
     "eval": "tsx evals/run.ts",
     "eval:retrieval": "tsx evals/run.ts --retrieval-only",

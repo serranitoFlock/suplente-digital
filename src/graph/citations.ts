@@ -20,6 +20,11 @@ export function selectCitedSources(sources: Source[], reply: string): CitedSourc
   return sources.flatMap((source, i) => (cited.has(i + 1) ? [{ ...source, n: i + 1 }] : []));
 }
 
+/** "file › heading", or just the source when the chunk has no heading (e.g. an Engram note, whose label already holds its title). */
+export function sourceLabel({ source, heading }: Pick<Source, "source" | "heading">): string {
+  return heading ? `${source} › ${heading}` : source;
+}
+
 export function formatCitedSources(sources: CitedSource[]): string {
-  return sources.map((s) => `[${s.n}] ${s.source} › ${s.heading}`).join("\n");
+  return sources.map((s) => `[${s.n}] ${sourceLabel(s)}`).join("\n");
 }

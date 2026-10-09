@@ -9,6 +9,8 @@ export interface IndexedChunk extends Chunk {
 export interface VectorIndex {
   model: string;
   createdAt: string;
+  /** Chunk counts per source origin (`knowledge`, `engram-sample`, `engram-real`); absent in older indexes. */
+  composition?: Partial<Record<string, number>>;
   chunks: IndexedChunk[];
 }
 

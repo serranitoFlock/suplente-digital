@@ -6,6 +6,7 @@ import { resolveMemoryTurns } from "./memory/conversation-memory.js";
 import { resolveShowCitations } from "./presentation/format-answer.js";
 import { resolveAllowedLinkHosts } from "./security/guards.js";
 import { resolveConcurrency } from "./service/assistant-service.js";
+import { resolveFlag } from "./rag/engram-config.js";
 
 const root = process.cwd();
 const env = (name: string): string | undefined => process.env[name]?.trim() || undefined;
@@ -21,6 +22,19 @@ export const config = {
   embeddingModel: env("EMBEDDING_MODEL") ?? "Xenova/multilingual-e5-small",
   transformersCacheDir: resolve(root, env("TRANSFORMERS_CACHE_DIR") ?? ".cache/transformers"),
   retrieval: { topK: 4, minScore: 0.82 },
+  /**
+   * Engram notes as a second knowledge source (see README, "Conocimiento desde Engram"):
+   * `ENGRAM_SOURCES_CONFIG` (local allowlist, default `config/engram-sources.local.json`),
+   * `ENGRAM_EXPORT_DIR` (default `data/engram`), `ENGRAM_REAL` (index the real exports, default true)
+   * and `ENGRAM_SAMPLE` (index the fictional `knowledge/engram-sample.json`, default true).
+   */
+  engram: {
+    configPath: resolve(root, env("ENGRAM_SOURCES_CONFIG") ?? "config/engram-sources.local.json"),
+    exportDir: resolve(root, env("ENGRAM_EXPORT_DIR") ?? "data/engram"),
+    samplePath: resolve(root, "knowledge/engram-sample.json"),
+    includeReal: resolveFlag("ENGRAM_REAL", process.env.ENGRAM_REAL, true),
+    includeSample: resolveFlag("ENGRAM_SAMPLE", process.env.ENGRAM_SAMPLE, true),
+  },
   /** Output guard: replies may only link to these hosts and their subdomains (`ALLOWED_LINK_HOSTS`, comma-separated). */
   security: { allowedLinkHosts: resolveAllowedLinkHosts(process.env.ALLOWED_LINK_HOSTS) },
   /**

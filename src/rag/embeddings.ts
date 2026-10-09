@@ -6,6 +6,16 @@ export interface Embedder {
   embedPassages(texts: string[]): Promise<number[][]>;
 }
 
+const PASSAGE_BATCH_SIZE = 16;
+
+/** Splits a list into consecutive batches of at most `size` items. */
+export function inBatches<T>(items: readonly T[], size: number): T[][] {
+  if (size < 1) throw new Error("Batch size must be at least 1.");
+  const batches: T[][] = [];
+  for (let i = 0; i < items.length; i += size) batches.push(items.slice(i, i + size));
+  return batches;
+}
+
 /**
  * Local multilingual embeddings (no API key). E5 models expect "query: " and
  * "passage: " prefixes; vectors are mean-pooled and L2-normalized.
@@ -24,7 +34,11 @@ export class LocalE5Embedder implements Embedder {
   }
 
   async embedPassages(texts: string[]): Promise<number[][]> {
-    return this.embed(texts.map((t) => `passage: ${t}`));
+    // Small batches: one batch pads every text to the longest one, which made a few hundred
+    // Engram notes take minutes and gigabytes of memory.
+    const vectors: number[][] = [];
+    for (const batch of inBatches(texts, PASSAGE_BATCH_SIZE)) vectors.push(...(await this.embed(batch.map((t) => `passage: ${t}`))));
+    return vectors;
   }
 
   private async embed(texts: string[]): Promise<number[][]> {
