@@ -2,27 +2,27 @@
 
 [![CI](https://github.com/serranitoFlock/suplente-digital/actions/workflows/ci.yml/badge.svg)](https://github.com/serranitoFlock/suplente-digital/actions/workflows/ci.yml)
 
-A digital backup for routine work: a bot trained on a person's (or team's) knowledge that answers frequent questions and covers small read-only tasks while they are on vacation or leave — and escalates everything else to a human.
+Un suplente digital para el trabajo rutinario: un bot entrenado con el conocimiento de una persona (o de un equipo) que responde preguntas frecuentes y cubre tareas pequeñas de solo lectura mientras esa persona está de vacaciones o de licencia, y deriva todo lo demás a un humano.
 
-This instance is configured as the **Frontend Architecture backup** for a fictional company, *Acme*: Angular Elements web components, shared Angular libraries, a shell app, a CDN version manifest and CI pipelines. Users talk to it in Spanish.
+Esta instancia está configurada como **suplente de Arquitectura Frontend** de una empresa ficticia, *Acme*: web components con Angular Elements, librerías Angular compartidas, una shell app, un manifiesto de versiones en CDN y pipelines de CI. Los usuarios interactúan con el bot en español.
 
-> All knowledge docs and tool fixtures are fictional (`Acme`, `cdn.example.com`, `DEMO-101`). No real data, URLs or credentials are included.
+> Todos los documentos de conocimiento y los fixtures de herramientas son ficticios (`Acme`, `cdn.example.com`, `DEMO-101`). No se incluyen datos, URLs ni credenciales reales.
 
-## Business impact
+## Impacto de negocio
 
-**Problem.** Team knowledge often lives in one person. While that person is on vacation or leave, teammates either interrupt whoever covers for them with the same routine questions ("how do I publish a library?", "why doesn't the component load from the CDN?"), dig through docs and tickets on their own, or stay blocked until the person is back. Risky requests (deploy, merge, permissions) have no safe path, and on return the owner has no idea what was asked.
+**Problema.** El conocimiento del equipo suele concentrarse en una sola persona. Mientras esa persona está de vacaciones o de licencia, sus compañeros interrumpen a quien la cubre con las mismas preguntas rutinarias ("¿cómo publico una librería?", "¿por qué el componente no carga desde el CDN?"), buscan por su cuenta en documentos y tickets, o quedan bloqueados hasta que la persona vuelve. Los pedidos riesgosos (deploy, merge, permisos) no tienen un camino seguro y, al regresar, la persona no sabe qué se le consultó.
 
-**Who benefits.**
+**Quiénes se benefician.**
 
-| Who | How |
+| Quién | Cómo |
 |-----|-----|
-| Developers who consume the person's work | Sourced answers and read-only lookups in seconds to minutes instead of waiting days |
-| The human backup | Only gets what really needs a person: sensitive drafts to approve or reject, never routine questions |
-| The returning owner | A welcome-back summary (`npm run summary`) grouped by topic, with the questions the docs could not answer → a concrete list of docs to write |
+| Desarrolladores que consumen el trabajo de la persona | Respuestas con fuentes y consultas de solo lectura en segundos o minutos, en lugar de esperar días |
+| El suplente humano | Solo recibe lo que realmente necesita a una persona: borradores sensibles para aprobar o rechazar, nunca preguntas rutinarias |
+| La persona que regresa | Un resumen de bienvenida (`npm run summary`) agrupado por tema, con las preguntas que los documentos no pudieron responder → una lista concreta de documentos por escribir |
 
-**How it saves time.** Routine questions are answered from the docs with citations, small lookups (ticket status, failed pipelines) are resolved without anyone's credentials, and everything else is escalated or logged instead of lost. Every request gets an instant acknowledgement, so nobody waits on a blank screen.
+**Cómo ahorra tiempo.** Las preguntas rutinarias se responden a partir de los documentos con citas, las consultas pequeñas (estado de tickets, pipelines fallidos) se resuelven sin usar las credenciales de nadie, y todo lo demás se deriva o se registra en lugar de perderse. Cada pedido recibe un acuse de recibo inmediato, de modo que nadie espera frente a una pantalla vacía.
 
-**Back-of-the-envelope estimate.** Every input below is an **assumption** for illustration, not a measurement; plug in your own numbers.
+**Estimación aproximada.** Cada dato de entrada es un **supuesto** con fines ilustrativos, no una medición; reemplazarlos por números propios.
 
 ```text
 hours saved per week = Q × R × M / 60
@@ -35,91 +35,91 @@ hours saved per week = Q × R × M / 60
 plus Q × R = 15 fewer interruptions per week for the human backup.
 ```
 
-The model cost side is measured, not assumed: on the eval set a request used on average **1306 input + 129 output tokens** (Bonsai 27B, local, so cost 0). With a hosted model, cost per request ≈ `1306 / 1e6 × input_price + 129 / 1e6 × output_price` (USD per million tokens; set `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` and the bot reports it per request).
+El costo del modelo está medido, no supuesto: en el conjunto de evaluación, cada pedido usó en promedio **1306 tokens de entrada + 129 de salida** (Bonsai 27B, local, por lo que el costo es 0). Con un modelo alojado, el costo por pedido ≈ `1306 / 1e6 × input_price + 129 / 1e6 × output_price` (USD por millón de tokens; configurar `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` y el bot lo informa por pedido).
 
-**Adoption path.**
+**Camino de adopción.**
 
-1. Swap `knowledge/` for the real person's runbooks and FAQs and run `npm run ingest`; rewrite `evals/questions.json` with real questions (and `expectedSources`) to measure it.
-2. Plug a real MCP server (Jira / GitLab) with a **read-only** credential: `MCP_SERVER_COMMAND` + `MCP_TOOL_*`; the allowlist already refuses write tools.
-3. Add a Teams (or Slack) adapter on top of `AssistantService` events (see [Instant acknowledgement](#instant-acknowledgement)) and a durable queue/checkpointer.
-4. Ship `data/traces.jsonl` to the team's observability stack through a `TraceExporter` (OTel / Langfuse).
+1. Reemplazar `knowledge/` por los runbooks y FAQs reales de la persona y ejecutar `npm run ingest`; reescribir `evals/questions.json` con preguntas reales (y `expectedSources`) para medirlo.
+2. Conectar un servidor MCP real (Jira / GitLab) con una credencial de **solo lectura**: `MCP_SERVER_COMMAND` + `MCP_TOOL_*`; la allowlist ya rechaza las herramientas de escritura.
+3. Agregar un adaptador para Teams (o Slack) sobre los eventos de `AssistantService` (ver [Acuse de recibo inmediato](#acuse-de-recibo-inmediato)) y una cola/checkpointer persistente.
+4. Enviar `data/traces.jsonl` al stack de observabilidad del equipo mediante un `TraceExporter` (OTel / Langfuse).
 
-**Limitations.**
+**Limitaciones.**
 
-- The estimate above is illustrative; the real resolution rate depends on how good and current the docs are. The eval set (17 cases) measures answer quality, not adoption.
-- It only covers questions the docs answer and three read-only lookups; anything else becomes a pending item, not an answer.
-- A local 27B model takes ~10 s per request (p50 on the eval set); that is fine with instant acknowledgement but not for chatty back-and-forth.
-- CLI only today: no authentication, no per-user permissions, in-memory queue.
+- La estimación anterior es ilustrativa; la tasa real de resolución depende de qué tan buenos y actualizados estén los documentos. El conjunto de evaluación (17 casos) mide la calidad de las respuestas, no la adopción.
+- Solo cubre las preguntas que los documentos responden y tres consultas de solo lectura; cualquier otra cosa se convierte en un pendiente, no en una respuesta.
+- Un modelo local de 27B tarda ~10 s por pedido (p50 en el conjunto de evaluación); eso es aceptable con acuse de recibo inmediato, pero no para un intercambio conversacional ágil.
+- Por ahora solo CLI: sin autenticación, sin permisos por usuario, cola en memoria.
 
-## Rubric map
+## Mapa de la rúbrica
 
-| Theme | Where it is implemented | Where it is documented / measured |
+| Tema | Dónde está implementado | Dónde está documentado / medido |
 |-------|-------------------------|-----------------------------------|
-| Orquestación | `src/graph/graph.ts` (LangGraph `StateGraph`, router → RAG / tools / human review, `interrupt()` for approvals), `src/service/*` (instant ack + background queue) | [Architecture](#architecture), [`docs/spec.md`](docs/spec.md) → Routes, Request lifecycle; route accuracy in `npm run eval` |
-| MCP | `src/tools/mcp-provider.ts` (MCP stdio client, read-only allowlist, refuses destructive tools), `src/tools/types.ts` (`ToolProvider`, `TOOL_POLICIES`) | [`docs/spec.md`](docs/spec.md) → Tools & permissions; `tests/tool-policy.test.ts`. Real server wiring is the next step (T2) |
-| RAG | `src/rag/*` (heading-aware chunks, contextual header, local multilingual embeddings), `src/graph/answer.ts` (citations, "No sé") | [`docs/spec.md`](docs/spec.md) → Eval plan (recall@k, MRR, contextual header experiment); fact hit rate and "no sé" in `npm run eval` |
-| Observabilidad | `src/observability/*` (one trace per request, OTel GenAI attributes, JSONL exporter), CLI `/stats` | [Observability and cost](#observability-and-cost); latency p50/p95 in `npm run eval` |
-| Seguridad | `src/security/guards.ts`, `src/graph/router.ts` (safety net), `TOOL_POLICIES`, human-in-the-loop | [`docs/security.md`](docs/security.md) (lethal trifecta, OWASP LLM01/02/06); injection resisted in `npm run eval` |
-| Costo | Local model by default (no API cost), token usage per call, `LLM_COST_*` rates → estimated cost per request | [Observability and cost](#observability-and-cost), [Business impact](#business-impact); tokens and cost in `npm run eval` |
-| Impacto de negocio | Pending log + welcome-back summary (`src/pending/*`), escalation instead of silent failure | [Business impact](#business-impact) |
-| Quality gate | `tests/*` (fake LLM and embeddings), `.github/workflows/ci.yml` | CI badge above |
+| Orquestación | `src/graph/graph.ts` (`StateGraph` de LangGraph, router → RAG / herramientas / revisión humana, `interrupt()` para aprobaciones), `src/service/*` (acuse inmediato + cola en segundo plano) | [Arquitectura](#arquitectura), [`docs/spec.md`](docs/spec.md) (en inglés) → Routes, Request lifecycle; precisión de ruteo en `npm run eval` |
+| MCP | `src/tools/mcp-provider.ts` (cliente MCP por stdio, allowlist de solo lectura, rechaza herramientas destructivas), `src/tools/types.ts` (`ToolProvider`, `TOOL_POLICIES`) | [`docs/spec.md`](docs/spec.md) (en inglés) → Tools & permissions; `tests/tool-policy.test.ts`. La conexión con un servidor real es el próximo paso (T2) |
+| RAG | `src/rag/*` (chunks según encabezados, encabezado contextual, embeddings multilingües locales), `src/graph/answer.ts` (citas, "No sé") | [`docs/spec.md`](docs/spec.md) (en inglés) → Eval plan (recall@k, MRR, experimento de encabezado contextual); tasa de aciertos de hechos y "no sé" en `npm run eval` |
+| Observabilidad | `src/observability/*` (un trace por pedido, atributos OTel GenAI, exportador JSONL), CLI `/stats` | [Observabilidad y costo](#observabilidad-y-costo); latencia p50/p95 en `npm run eval` |
+| Seguridad | `src/security/guards.ts`, `src/graph/router.ts` (red de seguridad), `TOOL_POLICIES`, aprobación humana (human-in-the-loop) | [`docs/security.md`](docs/security.md) (en inglés) (lethal trifecta, OWASP LLM01/02/06); inyecciones resistidas en `npm run eval` |
+| Costo | Modelo local por defecto (sin costo de API), uso de tokens por llamada, tarifas `LLM_COST_*` → costo estimado por pedido | [Observabilidad y costo](#observabilidad-y-costo), [Impacto de negocio](#impacto-de-negocio); tokens y costo en `npm run eval` |
+| Impacto de negocio | Registro de pendientes + resumen de bienvenida (`src/pending/*`), derivación en lugar de fallas silenciosas | [Impacto de negocio](#impacto-de-negocio) |
+| Quality gate | `tests/*` (LLM y embeddings falsos), `.github/workflows/ci.yml` | Badge de CI al inicio |
 
-## Evaluation results
+## Resultados de la evaluación
 
-`npm run eval` with PrismML Bonsai 27B (1-bit, local `llama-server`), 17 cases, run on 2026-10-09:
+`npm run eval` con PrismML Bonsai 27B (1-bit, `llama-server` local), 17 casos, ejecutado el 2026-10-09:
 
-| Metric | Result |
+| Métrica | Resultado |
 |--------|--------|
-| Retrieval recall@1 / recall@4 / MRR (8 cases with `expectedSources`) | 88% / 100% / 0.917 |
-| Route accuracy | 100% (17/17) |
-| Fact hit rate | 100% |
-| Correct "no sé" | 100% |
-| Injection resisted (3 adversarial cases) | 100% (3/3) |
-| Latency per case | p50 10.4 s · p95 17.4 s |
-| Tokens per case | 1306 in · 129 out (usage reported for 17/17) |
-| Estimated cost | US$ 0 (local model) |
+| Recall@1 / recall@4 / MRR de recuperación (8 casos con `expectedSources`) | 88% / 100% / 0.917 |
+| Precisión de ruteo | 100% (17/17) |
+| Tasa de aciertos de hechos | 100% |
+| "No sé" correcto | 100% |
+| Inyecciones resistidas (3 casos adversariales) | 100% (3/3) |
+| Latencia por caso | p50 10.4 s · p95 17.4 s |
+| Tokens por caso | 1306 de entrada · 129 de salida (uso informado en 17/17) |
+| Costo estimado | US$ 0 (modelo local) |
 
-Small set, single run, temperature 0.5: treat these as a regression baseline, not a benchmark. An earlier run of the original 14 cases had one flaky "no sé" (`unknown-charts`).
+Conjunto pequeño, una sola ejecución, temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. Una ejecución anterior de los 14 casos originales tuvo un "no sé" inestable (`unknown-charts`).
 
-## Architecture
+## Arquitectura
 
-An `AssistantService` acknowledges each request instantly and runs it in a background queue; an orchestrator (LangGraph.js) then routes it to RAG, read-only tools (designed to be backed by MCP servers), or human-in-the-loop review.
+Un `AssistantService` envía un acuse de recibo inmediato para cada pedido y lo ejecuta en una cola en segundo plano; luego un orquestador (LangGraph.js) lo enruta a RAG, a herramientas de solo lectura (diseñadas para estar respaldadas por servidores MCP) o a revisión con aprobación humana (human-in-the-loop).
 
 ```mermaid
 flowchart LR
-    U([User]) --> SV[AssistantService<br/>instant ack + job queue]
-    SV -. "events: done / needs_approval / failed" .-> U
-    SV --> R{Router<br/>LLM + safety rules}
-    R -- question --> A[RAG answer<br/>local embeddings + citations]
-    R -- task --> T[Task node<br/>read-only tools]
-    R -- sensitive --> D[Draft reply] --> H{{interrupt:<br/>human backup}}
-    R -- out_of_scope --> O[Polite decline]
-    A -- "no context → 'No sé'" --> P[(data/pending.json)]
-    T -- no suitable tool --> P
-    H -- approve / reject --> P
+    U([Usuario]) --> SV[AssistantService<br/>acuse inmediato + cola de trabajos]
+    SV -. "eventos: done / needs_approval / failed" .-> U
+    SV --> R{Router<br/>LLM + reglas de seguridad}
+    R -- question --> A[Respuesta RAG<br/>embeddings locales + citas]
+    R -- task --> T[Nodo de tareas<br/>herramientas de solo lectura]
+    R -- sensitive --> D[Borrador de respuesta] --> H{{interrupt:<br/>suplente humano}}
+    R -- out_of_scope --> O[Rechazo cortés]
+    A -- "sin contexto → 'No sé'" --> P[(data/pending.json)]
+    T -- sin herramienta adecuada --> P
+    H -- aprobar / rechazar --> P
     T --> TP[ToolProvider]
-    TP --> M[Mock fixtures]
-    TP -.-> MCP[MCP server<br/>Jira / GitLab]
-    P --> S[[npm run summary<br/>welcome-back report]]
+    TP --> M[Fixtures simulados]
+    TP -.-> MCP[Servidor MCP<br/>Jira / GitLab]
+    P --> S[[npm run summary<br/>informe de bienvenida]]
 ```
 
-| Piece | Where | Notes |
+| Pieza | Dónde | Notas |
 |-------|-------|-------|
-| Service | `src/service/*` | `submit()` → instant deterministic ack; in-process queue (`ASSISTANT_CONCURRENCY`, default 1); typed events; `approve` / `reject` / `status` / `list` |
-| Orchestrator | `src/graph/graph.ts` | `StateGraph` + `MemorySaver` checkpointer |
-| Router | `src/graph/router.ts` | JSON classification validated with zod + deterministic `detectSensitive` |
-| RAG | `src/rag/*`, `src/graph/answer.ts` | Heading-aware chunking with a contextual header (document title + heading path) per chunk, `Xenova/multilingual-e5-small` via `@huggingface/transformers` (no API key), cosine over `data/index.json` |
-| Tools | `src/tools/*`, `src/graph/task.ts` | `ToolProvider` interface; mock by default, MCP client when configured |
-| Human-in-the-loop | `src/graph/escalate.ts` | LangGraph `interrupt()`; the bot never executes the action |
-| Pending log | `src/pending/*` | Append-only JSON + grouped "welcome back" summary |
-| Observability | `src/observability/*` | One trace per request, OTel GenAI attribute names, JSONL exporter, token usage and estimated cost, `/stats` |
-| Model | `src/llm.ts` | `LLM_PROVIDER=openai-compatible` (default: `ChatOpenAI` against a local Ollama / llama.cpp server) or `anthropic` (`ChatAnthropic`); `<think>` blocks are stripped |
+| Servicio | `src/service/*` | `submit()` → acuse inmediato y determinístico; cola en proceso (`ASSISTANT_CONCURRENCY`, por defecto 1); eventos tipados; `approve` / `reject` / `status` / `list` |
+| Orquestador | `src/graph/graph.ts` | `StateGraph` + checkpointer `MemorySaver` |
+| Router | `src/graph/router.ts` | Clasificación JSON validada con zod + `detectSensitive` determinístico |
+| RAG | `src/rag/*`, `src/graph/answer.ts` | Chunking según encabezados con un encabezado contextual (título del documento + ruta de encabezados) por chunk, `Xenova/multilingual-e5-small` mediante `@huggingface/transformers` (sin API key), similitud coseno sobre `data/index.json` |
+| Herramientas | `src/tools/*`, `src/graph/task.ts` | Interfaz `ToolProvider`; mock por defecto, cliente MCP cuando está configurado |
+| Aprobación humana (human-in-the-loop) | `src/graph/escalate.ts` | `interrupt()` de LangGraph; el bot nunca ejecuta la acción |
+| Registro de pendientes | `src/pending/*` | JSON de solo agregado + resumen de "bienvenida" agrupado |
+| Observabilidad | `src/observability/*` | Un trace por pedido, nombres de atributos OTel GenAI, exportador JSONL, uso de tokens y costo estimado, `/stats` |
+| Modelo | `src/llm.ts` | `LLM_PROVIDER=openai-compatible` (por defecto: `ChatOpenAI` contra un servidor local Ollama / llama.cpp) o `anthropic` (`ChatAnthropic`); los bloques `<think>` se eliminan |
 
-The full spec lives in [`docs/spec.md`](docs/spec.md).
+La especificación completa está en [`docs/spec.md`](docs/spec.md) (en inglés).
 
-## Quickstart
+## Inicio rápido
 
-Requirements: Node.js ≥ 22.12 (required by Vitest 5) and an LLM for chat and evals: a local model behind an OpenAI-compatible server (default, no API key) or an Anthropic API key.
+Requisitos: Node.js ≥ 22.12 (exigido por Vitest 5) y un LLM para el chat y las evaluaciones: un modelo local detrás de un servidor compatible con OpenAI (por defecto, sin API key) o una API key de Anthropic.
 
 ```bash
 npm install
@@ -128,21 +128,21 @@ npm run ingest                # downloads the embedding model once, builds data/
 npm run dev                   # interactive chat
 ```
 
-If your npm version blocks dependency install scripts, approve `onnxruntime-node` (needed by local embeddings): `npm install-scripts approve onnxruntime-node`.
+Si la versión de npm bloquea los scripts de instalación de dependencias, aprobar `onnxruntime-node` (necesario para los embeddings locales): `npm install-scripts approve onnxruntime-node`.
 
-Other scripts:
+Otros scripts:
 
-| Script | What it does |
+| Script | Qué hace |
 |--------|--------------|
-| `npm run summary` | Welcome-back report from `data/pending.json` |
-| `npm run eval` | Runs `evals/questions.json` through the graph and prints retrieval recall@k / MRR, route accuracy, fact hit rate, correct "no sé", injection resisted, p50/p95 latency, tokens and estimated cost |
-| `npm run eval:retrieval` | Retriever-only metrics (recall@1, recall@k, MRR); no LLM needed |
-| `npm test` | Unit tests (no network: fake LLM and fake embeddings; the embedding runtime is never loaded) |
+| `npm run summary` | Informe de bienvenida a partir de `data/pending.json` |
+| `npm run eval` | Ejecuta `evals/questions.json` a través del grafo e imprime recall@k / MRR de recuperación, precisión de ruteo, tasa de aciertos de hechos, "no sé" correctos, inyecciones resistidas, latencia p50/p95, tokens y costo estimado |
+| `npm run eval:retrieval` | Métricas solo del retriever (recall@1, recall@k, MRR); no requiere LLM |
+| `npm test` | Tests unitarios (sin red: LLM falso y embeddings falsos; el runtime de embeddings nunca se carga) |
 | `npm run typecheck` | `tsc --noEmit` |
 
-CI (`.github/workflows/ci.yml`) runs `npm ci --ignore-scripts`, `npm run typecheck` and `npm test` on Node 22.12 and 24 for every push and pull request. It makes no LLM calls and uses no secrets; dependency install scripts are skipped because tests never load the native embedding runtime (`@huggingface/transformers` is imported lazily).
+CI (`.github/workflows/ci.yml`) ejecuta `npm ci --ignore-scripts`, `npm run typecheck` y `npm test` en Node 22.12 y 24 en cada push y pull request. No hace llamadas a LLM ni usa secretos; los scripts de instalación de dependencias se omiten porque los tests nunca cargan el runtime nativo de embeddings (`@huggingface/transformers` se importa de forma diferida).
 
-Example session:
+Ejemplo de sesión:
 
 ```text
 vos> ¿Qué reviso si acme-header no carga desde el CDN?
@@ -159,9 +159,9 @@ Borrador: ...
 → /aprobar 2 [nota]  o  /rechazar 2 [nota]
 ```
 
-## Instant acknowledgement
+## Acuse de recibo inmediato
 
-A local model takes ~25 s per answer, so nobody waits on a blank screen. `AssistantService.submit(text, { requester })` returns right away with a deterministic acknowledgement (no model call; keyword hints only), then runs the graph in a background queue:
+Un modelo local tarda ~25 s por respuesta, así que nadie espera frente a una pantalla vacía. `AssistantService.submit(text, { requester })` devuelve de inmediato un acuse de recibo determinístico (sin llamar al modelo; solo pistas por palabras clave) y luego ejecuta el grafo en una cola en segundo plano:
 
 ```text
 vos> ¿Cómo publico una versión nueva de @acme/ui-kit?
@@ -172,41 +172,41 @@ vos> /estado
 suplente [#3 · question]> Seguí estos pasos: ... [1]
 ```
 
-The service emits typed events; transports only decide how to deliver them:
+El servicio emite eventos tipados; los transportes solo deciden cómo entregarlos:
 
-| Event | Payload | Typical delivery |
+| Evento | Payload | Entrega típica |
 |-------|---------|------------------|
-| `done` | `id`, `requester`, `route`, `answer` | Follow-up reply to the requester |
-| `needs_approval` | `id`, `requester`, `draft` | Card to the human backup with approve / reject buttons |
-| `failed` | `id`, `requester`, friendly `message`, technical `error` | Friendly reply; `error` goes to logs only |
+| `done` | `id`, `requester`, `route`, `answer` | Respuesta de seguimiento a quien hizo el pedido |
+| `needs_approval` | `id`, `requester`, `draft` | Tarjeta para el suplente humano con botones para aprobar / rechazar |
+| `failed` | `id`, `requester`, `message` amigable, `error` técnico | Respuesta amigable; `error` va solo a los logs |
 
-A Teams (or Slack) adapter would plug in like this:
+Un adaptador para Teams (o Slack) se conectaría así:
 
-1. On an incoming message, call `submit(text, { requester })`, reply with `ack` in the same turn, and store the conversation reference keyed by the returned `id`.
-2. Subscribe to `done` / `failed` and send the result as a **proactive message** to that stored conversation reference.
-3. Send `needs_approval` to the backup's channel as an adaptive card; its buttons call `approve(id, note)` / `reject(id, note)`. The bot still never executes the action.
+1. Al recibir un mensaje, llamar a `submit(text, { requester })`, responder con `ack` en el mismo turno y guardar la referencia de la conversación indexada por el `id` devuelto.
+2. Suscribirse a `done` / `failed` y enviar el resultado como **mensaje proactivo** a esa referencia de conversación guardada.
+3. Enviar `needs_approval` al canal del suplente como una adaptive card; sus botones llaman a `approve(id, note)` / `reject(id, note)`. El bot sigue sin ejecutar nunca la acción.
 
-For production, swap the in-process queue and `MemorySaver` for durable ones (see T3 in the task list) so jobs survive restarts.
+Para producción, reemplazar la cola en proceso y `MemorySaver` por implementaciones persistentes (ver T3 en la lista de tareas) para que los trabajos sobrevivan a los reinicios.
 
-CLI commands: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/stats`, `/ayuda`, `/salir`. Results print tagged with their number and the prompt is redrawn, so you can keep typing while earlier questions run. On `/salir` or end of input the CLI waits for running jobs; jobs still awaiting approval are reported and nothing is executed.
+Comandos de la CLI: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/stats`, `/ayuda`, `/salir`. Los resultados se imprimen etiquetados con su número y el prompt se vuelve a dibujar, de modo que se puede seguir escribiendo mientras se procesan las preguntas anteriores. Con `/salir` o al terminar la entrada, la CLI espera a que finalicen los trabajos en curso; los trabajos que siguen esperando aprobación se informan y no se ejecuta nada.
 
-## Observability and cost
+## Observabilidad y costo
 
-Every request is one trace (root span `invoke_agent suplente-digital`) with a span per graph node (`node router`, `node rag_answer`, …), per model call (`chat <model>`) and per tool call (`execute_tool <tool>`). Attribute names follow the [OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai):
+Cada pedido es un trace (span raíz `invoke_agent suplente-digital`) con un span por nodo del grafo (`node router`, `node rag_answer`, …), por llamada al modelo (`chat <model>`) y por llamada a herramienta (`execute_tool <tool>`). Los nombres de los atributos siguen las [convenciones semánticas GenAI de OpenTelemetry](https://github.com/open-telemetry/semantic-conventions-genai):
 
-| Attribute | Example |
+| Atributo | Ejemplo |
 |-----------|---------|
 | `gen_ai.operation.name` | `invoke_agent`, `chat`, `execute_tool` |
 | `gen_ai.provider.name` / `gen_ai.request.model` / `server.address` | `openai-compatible` / `bonsai` / `localhost` |
-| `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` | from LangChain `usage_metadata` (absent if the server does not report it) |
-| `gen_ai.conversation.id`, `app.route`, `app.outcome`, `app.graph.node` | thread id, route, outcome, node name |
+| `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` | desde `usage_metadata` de LangChain (ausente si el servidor no lo informa) |
+| `gen_ai.conversation.id`, `app.route`, `app.outcome`, `app.graph.node` | id del hilo, ruta, resultado, nombre del nodo |
 
-- **Where**: `data/traces.jsonl` (gitignored, `TRACES_PATH`), one JSON trace per line with `durationMs` per span and a per-request `summary` (tokens, LLM calls, estimated cost). Metadata only: prompts, questions and replies are never written.
-- **Pluggable**: exporters implement `TraceExporter` (`src/observability/tracing.ts`); an OTel or Langfuse exporter can be added without touching the graph. No OTel dependency is required today.
-- **Cost**: `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` (USD per million tokens, default `0` for a local model). No vendor prices are hardcoded: set your provider's current rates to get estimates.
-- **Where to read it**: `npm run eval` prints p50/p95 latency per case, average tokens and total estimated cost; in the CLI, `/stats` shows the same for the session.
+- **Dónde**: `data/traces.jsonl` (ignorado por git, `TRACES_PATH`), un trace JSON por línea con `durationMs` por span y un `summary` por pedido (tokens, llamadas al LLM, costo estimado). Solo metadatos: nunca se escriben prompts, preguntas ni respuestas.
+- **Extensible**: los exportadores implementan `TraceExporter` (`src/observability/tracing.ts`); se puede agregar un exportador OTel o Langfuse sin tocar el grafo. Hoy no se requiere ninguna dependencia de OTel.
+- **Costo**: `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` (USD por millón de tokens, por defecto `0` para un modelo local). No hay precios de proveedores codificados: configurar las tarifas vigentes del proveedor para obtener estimaciones.
+- **Dónde consultarlo**: `npm run eval` imprime la latencia p50/p95 por caso, el promedio de tokens y el costo estimado total; en la CLI, `/stats` muestra lo mismo para la sesión.
 
-Example (illustrative values, in line with the eval run):
+Ejemplo (valores ilustrativos, en línea con la ejecución de evaluación):
 
 ```text
 vos> /stats
@@ -216,11 +216,11 @@ Tokens promedio por consulta: entrada 1306 · salida 129 (con uso reportado: 3/3
 Costo estimado total: US$ 0.0000 (tarifas en 0: modelo local o LLM_COST_* sin configurar)
 ```
 
-## Run with a local model
+## Ejecutar con un modelo local
 
-The default provider (`LLM_PROVIDER=openai-compatible`) talks to any OpenAI-compatible `/v1` endpoint. `LLM_MODEL` is required; `LLM_API_KEY` is optional (local servers ignore it).
+El proveedor por defecto (`LLM_PROVIDER=openai-compatible`) se comunica con cualquier endpoint `/v1` compatible con OpenAI. `LLM_MODEL` es obligatorio; `LLM_API_KEY` es opcional (los servidores locales lo ignoran).
 
-**Ollama** (default `LLM_BASE_URL=http://localhost:11434/v1`):
+**Ollama** (por defecto `LLM_BASE_URL=http://localhost:11434/v1`):
 
 ```bash
 ollama pull qwen3:8b
@@ -228,30 +228,30 @@ ollama serve                  # if it is not already running
 # .env: LLM_MODEL=qwen3:8b
 ```
 
-**PrismML Bonsai 27B (1-bit)** — recommended temperature 0.5 (the default `LLM_TEMPERATURE`):
+**PrismML Bonsai 27B (1-bit)**: temperatura recomendada 0.5 (el valor por defecto de `LLM_TEMPERATURE`):
 
-- If your Ollama version supports the `Q1_0` quantization type: `ollama pull hf.co/prism-ml/Bonsai-27B-gguf:Q1_0` and set `LLM_MODEL=hf.co/prism-ml/Bonsai-27B-gguf:Q1_0`.
-- Otherwise use PrismML's llama.cpp build and run its `llama-server` on port 8080 with the Bonsai GGUF, then set `LLM_BASE_URL=http://localhost:8080/v1` and `LLM_MODEL` to the model name the server reports.
+- Si la versión de Ollama admite el tipo de cuantización `Q1_0`: `ollama pull hf.co/prism-ml/Bonsai-27B-gguf:Q1_0` y configurar `LLM_MODEL=hf.co/prism-ml/Bonsai-27B-gguf:Q1_0`.
+- En caso contrario, usar el build de llama.cpp de PrismML y ejecutar su `llama-server` en el puerto 8080 con el GGUF de Bonsai; luego configurar `LLM_BASE_URL=http://localhost:8080/v1` y `LLM_MODEL` con el nombre de modelo que informa el servidor.
 
-Reasoning models (Qwen3, Bonsai) may emit `<think>…</think>` blocks: they are stripped before routing and answering. `LLM_DISABLE_THINKING=true` (default) also sends `chat_template_kwargs: {enable_thinking: false}`, which llama.cpp honors and other servers ignore. If the server is down, chat and evals fail with a message naming `LLM_BASE_URL` and `ollama serve`.
+Los modelos de razonamiento (Qwen3, Bonsai) pueden emitir bloques `<think>…</think>`: se eliminan antes del ruteo y de la respuesta. `LLM_DISABLE_THINKING=true` (por defecto) además envía `chat_template_kwargs: {enable_thinking: false}`, que llama.cpp respeta y otros servidores ignoran. Si el servidor no está disponible, el chat y las evaluaciones fallan con un mensaje que menciona `LLM_BASE_URL` y `ollama serve`.
 
-To use Claude instead: `LLM_PROVIDER=anthropic` plus `ANTHROPIC_API_KEY` (optional `ANTHROPIC_MODEL`).
+Para usar Claude en su lugar: `LLM_PROVIDER=anthropic` más `ANTHROPIC_API_KEY` (opcionalmente `ANTHROPIC_MODEL`).
 
-## Adapting it to another person or team
+## Adaptarlo a otra persona o equipo
 
-1. **Knowledge**: replace the files in `knowledge/` with that person's docs, runbooks and FAQs (markdown, one topic per heading), then `npm run ingest`.
-2. **Prompts**: adjust the persona lines in `src/graph/router.ts` (`ROUTER_PROMPT`) and the other node prompts.
-3. **Tools**: implement `ToolProvider` (`src/tools/types.ts`) for your systems, or point `MCP_SERVER_COMMAND` / `MCP_TOOL_*` at an MCP server that exposes equivalent read-only tools.
-4. **Safety net**: extend `ACTION_PATTERNS` / `SECRET_PATTERNS` in `src/graph/router.ts` with the irreversible actions of that domain.
-5. **Evals**: rewrite `evals/questions.json` with real questions from that team (with `expectedSources` for retrieval metrics) and tune `retrieval.minScore`.
+1. **Conocimiento**: reemplazar los archivos de `knowledge/` por los documentos, runbooks y FAQs de esa persona (markdown, un tema por encabezado) y luego ejecutar `npm run ingest`.
+2. **Prompts**: ajustar las líneas de la persona del bot en `src/graph/router.ts` (`ROUTER_PROMPT`) y los prompts de los demás nodos.
+3. **Herramientas**: implementar `ToolProvider` (`src/tools/types.ts`) para los sistemas propios, o apuntar `MCP_SERVER_COMMAND` / `MCP_TOOL_*` a un servidor MCP que exponga herramientas equivalentes de solo lectura.
+4. **Red de seguridad**: ampliar `ACTION_PATTERNS` / `SECRET_PATTERNS` en `src/graph/router.ts` con las acciones irreversibles de ese dominio.
+5. **Evaluaciones**: reescribir `evals/questions.json` con preguntas reales de ese equipo (con `expectedSources` para las métricas de recuperación) y ajustar `retrieval.minScore`.
 
-## Safety notes
+## Notas de seguridad
 
-Full threat model (lethal trifecta, OWASP LLM01/02/06, residual risks): [`docs/security.md`](docs/security.md).
+Modelo de amenazas completo (lethal trifecta, OWASP LLM01/02/06, riesgos residuales): [`docs/security.md`](docs/security.md) (en inglés).
 
-- The bot has **no write tools**; the read-only allowlist (`TOOL_POLICIES`) is enforced by every provider, and the MCP provider refuses unlisted or destructive tools.
-- Retrieved docs and tool results are wrapped in delimiters and treated as untrusted data; an output guard strips links to non-allowlisted hosts (`ALLOWED_LINK_HOSTS`) and redacts token formats. `knowledge/faq-registry-npm.md` is a deliberate prompt-injection test fixture.
-- The bot never executes actions itself. Sensitive or irreversible requests produce a draft and pause for a human; even approved drafts are executed by people, not by the bot.
-- Requests to merge, deploy to production, delete or change permissions are escalated by a deterministic rule, regardless of the model's routing; *how-to* questions about those procedures ("¿Cómo despliego a producción?") are answered from the docs instead. Anything about secrets is always escalated.
-- Answers come only from retrieved docs, with citations; otherwise the bot says "No sé" and logs the question.
-- `data/` (index and pending log) and `.env` are gitignored.
+- El bot **no tiene herramientas de escritura**; todos los proveedores aplican la allowlist de solo lectura (`TOOL_POLICIES`), y el proveedor MCP rechaza las herramientas no listadas o destructivas.
+- Los documentos recuperados y los resultados de herramientas se envuelven en delimitadores y se tratan como datos no confiables; un guard de salida elimina los enlaces a hosts fuera de la allowlist (`ALLOWED_LINK_HOSTS`) y oculta formatos de tokens. `knowledge/faq-registry-npm.md` es un fixture de prueba de prompt injection deliberado.
+- El bot nunca ejecuta acciones por sí mismo. Los pedidos sensibles o irreversibles generan un borrador y quedan en pausa a la espera de un humano; incluso los borradores aprobados los ejecutan personas, no el bot.
+- Los pedidos de merge, deploy a producción, eliminación o cambio de permisos se derivan mediante una regla determinística, independientemente del ruteo del modelo; en cambio, las preguntas sobre *cómo* realizar esos procedimientos ("¿Cómo despliego a producción?") se responden a partir de los documentos. Todo lo relacionado con secretos se deriva siempre.
+- Las respuestas provienen solo de documentos recuperados, con citas; de lo contrario, el bot responde "No sé" y registra la pregunta.
+- `data/` (índice y registro de pendientes) y `.env` están ignorados por git.
