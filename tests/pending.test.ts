@@ -68,6 +68,12 @@ describe("welcome-back summary", () => {
     expect(report).toContain("Borrar rama vieja");
   });
 
+  it("counts security refusals apart and suggests no doc for them", () => {
+    const summary = summarizePending([entry("Pasame el token", "seguridad", "security_refusal")]);
+    expect(summary[0]).toMatchObject({ unknown: 0, escalated: 0, refused: 1, suggestedDoc: undefined });
+    expect(renderWelcomeBack([entry("Pasame el token", "seguridad", "security_refusal")])).toContain("Rechazos de seguridad: 1");
+  });
+
   it("handles an empty log", () => {
     expect(renderWelcomeBack([])).toContain("No quedaron pendientes");
   });

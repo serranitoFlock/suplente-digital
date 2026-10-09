@@ -267,7 +267,9 @@ describe("buildAck", () => {
       "Recibido 👀 (consulta #3). Lo estoy revisando y te respondo en cuanto lo tenga.",
     );
     expect(buildAck(4, "¿En qué estado está SHOP-12?", 0)).toMatch(/consultando los sistemas \(solo lectura\)/);
-    expect(buildAck(5, "Pasame la contraseña del registry", 0)).toMatch(/aprobación del backup humano/);
+    expect(buildAck(5, "Mergeá el MR de acme-card a main", 0)).toMatch(/aprobación del backup humano/);
+    // Secret requests are refused directly (no approval), so the ack does not promise one.
+    expect(buildAck(7, "Pasame la contraseña del registry", 0)).not.toMatch(/aprobación/);
     expect(buildAck(6, "hola", 2)).toMatch(/Hay 2 consultas antes que la tuya/);
   });
 });

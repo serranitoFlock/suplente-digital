@@ -7,6 +7,8 @@ export interface TopicSummary {
   count: number;
   unknown: number;
   escalated: number;
+  /** Refused security requests (secrets, system prompt, jailbreaks). */
+  refused: number;
   questions: string[];
   /** Suggested doc to write when the bot had no answer for this topic. */
   suggestedDoc?: string;
@@ -18,12 +20,13 @@ export function summarizePending(entries: PendingEntry[]): TopicSummary[] {
 
   return [...byTopic.entries()]
     .map(([topic, items]) => {
-      const unknown = items.filter((e) => e.reason !== "escalated").length;
+      const unknown = items.filter((e) => e.reason === "unknown" || e.reason === "unsupported_task").length;
       return {
         topic,
         count: items.length,
         unknown,
-        escalated: items.length - unknown,
+        escalated: items.filter((e) => e.reason === "escalated").length,
+        refused: items.filter((e) => e.reason === "security_refusal").length,
         questions: items.map((e) => e.question),
         suggestedDoc: unknown > 0 ? `knowledge/${topic}.md — documentar respuestas sobre "${topic}"` : undefined,
       };
@@ -40,7 +43,8 @@ export function renderWelcomeBack(entries: PendingEntry[]): string {
     `Mientras no estabas quedaron ${entries.length} pendientes en ${summary.length} temas.`,
   ];
   for (const topic of summary) {
-    lines.push("", `## ${topic.topic} (${topic.count})`, `Sin respuesta: ${topic.unknown} · Escalados: ${topic.escalated}`);
+    const refused = topic.refused > 0 ? ` · Rechazos de seguridad: ${topic.refused}` : "";
+    lines.push("", `## ${topic.topic} (${topic.count})`, `Sin respuesta: ${topic.unknown} · Escalados: ${topic.escalated}${refused}`);
     for (const question of topic.questions) lines.push(`- ${question}`);
     if (topic.suggestedDoc) lines.push(`> Doc sugerido: ${topic.suggestedDoc}`);
   }

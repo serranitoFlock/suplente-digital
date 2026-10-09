@@ -93,6 +93,7 @@ flowchart LR
     R -- question --> A[Respuesta RAG<br/>embeddings locales + citas]
     R -- task --> T[Nodo de tareas<br/>herramientas de solo lectura]
     R -- sensitive --> D[Borrador de respuesta] --> H{{interrupt:<br/>suplente humano}}
+    R -- refuse --> X[Rechazo fijo<br/>secretos / prompt / jailbreak]
     R -- out_of_scope --> O[Rechazo cortés]
     R -- "clarify (referencia ambigua)" --> C[Pregunta de aclaración]
     A -- "sin contexto → 'No sé'" --> P[(data/pending.json)]
@@ -108,7 +109,7 @@ flowchart LR
 |-------|-------|-------|
 | Servicio | `src/service/*` | `submit()` → acuse inmediato y determinístico; cola en proceso (`ASSISTANT_CONCURRENCY`, por defecto 1); eventos tipados; `approve` / `reject` / `status` / `list` |
 | Orquestador | `src/graph/graph.ts` | `StateGraph` + checkpointer `MemorySaver` |
-| Router | `src/graph/router.ts` | Clasificación JSON validada con zod + `detectSensitive` determinístico |
+| Router | `src/graph/router.ts` | Clasificación JSON validada con zod + reglas determinísticas (`detectRefusal`, `detectSensitive`) |
 | RAG | `src/rag/*`, `src/graph/answer.ts` | Chunking según encabezados con un encabezado contextual (título del documento + ruta de encabezados) por chunk, `Xenova/multilingual-e5-small` mediante `@huggingface/transformers` (sin API key), similitud coseno sobre `data/index.json` |
 | Herramientas | `src/tools/*`, `src/graph/task.ts` | Interfaz `ToolProvider`; mock por defecto, cliente MCP cuando está configurado |
 | Aprobación humana (human-in-the-loop) | `src/graph/escalate.ts` | `interrupt()` de LangGraph; el bot nunca ejecuta la acción |
@@ -258,7 +259,8 @@ Modelo de amenazas completo (lethal trifecta, OWASP LLM01/02/06, riesgos residua
 
 - El bot **no tiene herramientas de escritura**; todos los proveedores aplican la allowlist de solo lectura (`TOOL_POLICIES`), y el proveedor MCP rechaza las herramientas no listadas o destructivas.
 - Los documentos recuperados y los resultados de herramientas se envuelven en delimitadores y se tratan como datos no confiables; un guard de salida elimina los enlaces a hosts fuera de la allowlist (`ALLOWED_LINK_HOSTS`) y oculta formatos de tokens. `knowledge/faq-registry-npm.md` es un fixture de prueba de prompt injection deliberado.
-- El bot nunca ejecuta acciones por sí mismo. Los pedidos sensibles o irreversibles generan un borrador y quedan en pausa a la espera de un humano; incluso los borradores aprobados los ejecutan personas, no el bot.
-- Los pedidos de merge, deploy a producción, eliminación o cambio de permisos se derivan mediante una regla determinística, independientemente del ruteo del modelo; en cambio, las preguntas sobre *cómo* realizar esos procedimientos ("¿Cómo despliego a producción?") se responden a partir de los documentos. Todo lo relacionado con secretos se deriva siempre.
+- El bot nunca ejecuta acciones por sí mismo. Los pedidos de acciones reales (merge, deploy, eliminación, cambios en tickets o permisos) generan un borrador y quedan en pausa a la espera de un humano; incluso los borradores aprobados los ejecutan personas, no el bot.
+- Los pedidos de secretos o credenciales, del prompt del sistema o los intentos de que el bot ignore sus instrucciones se rechazan de inmediato con una respuesta fija, sin ofrecer `/aprobar` (no hay nada que aprobar), y quedan registrados como evento de seguridad.
+- Los pedidos de merge, deploy a producción, eliminación o cambio de permisos se derivan mediante una regla determinística, independientemente del ruteo del modelo; en cambio, las preguntas sobre *cómo* realizar esos procedimientos ("¿Cómo despliego a producción?") se responden a partir de los documentos. Todo lo relacionado con secretos se rechaza siempre.
 - Las respuestas provienen solo de documentos recuperados, con citas; de lo contrario, el bot responde "No sé" y registra la pregunta.
 - `data/` (índice y registro de pendientes) y `.env` están ignorados por git.

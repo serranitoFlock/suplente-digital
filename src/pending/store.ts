@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-export type PendingReason = "unknown" | "escalated" | "unsupported_task";
+/** `security_refusal`: a refused request for secrets / the system prompt / a jailbreak (security event). */
+export type PendingReason = "unknown" | "escalated" | "unsupported_task" | "security_refusal";
 
 export interface PendingEntry {
   id: string;

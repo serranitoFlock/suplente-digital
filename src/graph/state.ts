@@ -4,13 +4,16 @@ import type { PendingStore } from "../pending/store.js";
 import type { Retriever } from "../rag/retriever.js";
 import type { ToolProvider } from "../tools/types.js";
 
-/** Routes the LLM router may choose. */
-export const ROUTES = ["question", "task", "sensitive", "out_of_scope"] as const;
+/**
+ * Routes the LLM router may choose. `sensitive` = a real action that needs human approval;
+ * `refuse` = secrets, the system prompt or attempts to override the instructions (refused directly).
+ */
+export const ROUTES = ["question", "task", "sensitive", "refuse", "out_of_scope"] as const;
 /** Every graph route: the LLM routes plus deterministic ones (`clarify`: an unresolvable follow-up reference). */
 export const GRAPH_ROUTES = [...ROUTES, "clarify"] as const;
 export type Route = (typeof GRAPH_ROUTES)[number];
 
-export type Outcome = "answered" | "unknown" | "approved" | "rejected" | "out_of_scope" | "clarify";
+export type Outcome = "answered" | "unknown" | "approved" | "rejected" | "out_of_scope" | "clarify" | "refused";
 
 export interface Source {
   source: string;

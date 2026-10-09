@@ -34,6 +34,8 @@ interface EvalCase {
   history?: ConversationTurn[];
   /** The reply must not call any tool (e.g. a clarification instead of an invented id). */
   mustNotCallTools?: boolean;
+  /** Why an expectation changed (kept next to the case so spec changes are visible, not silent). */
+  note?: string;
   /** Strings the reply must not mention (e.g. an unrelated ticket a wrong follow-up would invent). */
   mustNotMention?: string[];
 }

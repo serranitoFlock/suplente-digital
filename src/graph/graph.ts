@@ -2,7 +2,7 @@ import { Command, END, isGraphInterrupt, MemorySaver, START, StateGraph, type Ba
 import { withSpan, type Tracer } from "../observability/tracing.js";
 import type { ToolProvider } from "../tools/types.js";
 import { makeAnswerNode } from "./answer.js";
-import { clarifyNode, makeDraftNode, makeHumanReviewNode, outOfScopeNode } from "./escalate.js";
+import { clarifyNode, makeDraftNode, makeHumanReviewNode, makeRefuseNode, outOfScopeNode } from "./escalate.js";
 import { makeRouterNode } from "./router.js";
 import { AgentState, type ConversationTurn, type GraphDeps, type ReviewDecision, type ReviewRequest, type State } from "./state.js";
 import { makeTaskNode } from "./task.js";
@@ -35,6 +35,7 @@ export function buildGraph(deps: GraphDeps, checkpointer: BaseCheckpointSaver = 
     .addNode("human_review", traced("human_review", makeHumanReviewNode(nodeDeps)))
     .addNode("out_of_scope", traced("out_of_scope", outOfScopeNode))
     .addNode("clarify", traced("clarify", clarifyNode))
+    .addNode("refuse", traced("refuse", makeRefuseNode(nodeDeps)))
     .addEdge(START, "router")
     .addConditionalEdges("router", (state) => state.route, {
       question: "rag_answer",
@@ -42,6 +43,7 @@ export function buildGraph(deps: GraphDeps, checkpointer: BaseCheckpointSaver = 
       sensitive: "draft_escalation",
       out_of_scope: "out_of_scope",
       clarify: "clarify",
+      refuse: "refuse",
     })
     .addEdge("draft_escalation", "human_review")
     .addEdge("rag_answer", END)
@@ -49,6 +51,7 @@ export function buildGraph(deps: GraphDeps, checkpointer: BaseCheckpointSaver = 
     .addEdge("human_review", END)
     .addEdge("out_of_scope", END)
     .addEdge("clarify", END)
+    .addEdge("refuse", END)
     .compile({ checkpointer });
 }
 
@@ -96,6 +99,7 @@ export async function tracedTurn(
     root.setAttributes({
       "app.route": turn.state.route ?? "unknown",
       "app.outcome": turn.review ? "needs_approval" : (turn.state.outcome ?? "unknown"),
+      ...(turn.state.route === "refuse" ? { "app.security_event": "refusal" } : {}),
     });
     return turn;
   });

@@ -60,19 +60,23 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 |-------|---------|----------|
 | `question` | Knowledge/procedure question | Retrieve top-k chunks; answer only from context with `[n]` citations; otherwise reply "No sé" and log pending |
 | `task` | Live operational info (tickets, pipelines) | Model picks one read-only tool (validated with zod); result summarized |
-| `sensitive` | Irreversible, permissioned or secret-related | Draft reply → `interrupt` → human approves/rejects → logged |
+| `sensitive` | A real action: merge, deploy, delete, ticket/write changes, permission changes | Draft reply → `interrupt` → human approves/rejects → logged |
+| `refuse` | Requests for secrets/credentials or the system prompt, or attempts to override the instructions | Fixed, polite Spanish refusal; no model call when the rule matches, no approval prompt; logged as a security event (`security_refusal` in the pending log, `app.security_event` on the trace) |
 | `out_of_scope` | Unrelated to the team | Polite decline, no further model calls |
 | `clarify` | Follow-up reference that cannot be resolved from the conversation (deterministic, before the LLM router) | Short clarification question; no model or tool call |
 
-The router is an LLM classifier with a deterministic safety net (`detectSensitive`): matching requests are forced to `sensitive` even if the model disagrees. Unparseable router output falls back to `question`, which can only answer from docs.
+The router is an LLM classifier with a deterministic safety net: `detectRefusal` sends secret / system-prompt / jailbreak requests to `refuse` before any model call, and `detectSensitive` forces irreversible actions to `sensitive` even if the model disagrees. Unparseable router output falls back to `question`, which can only answer from docs.
 
 Route boundaries (the router prompt states them as a decision rule plus few-shot examples that deliberately avoid the eval questions):
 
 - Asking **how** to do something, **what** to check, or **whom** to contact → `question`, even when it mentions production, the CDN or an incident.
 - Asking the bot to **look up live data** now (a ticket, failed pipelines) → `task`.
-- Asking the bot to **do** something irreversible or permissioned, or to reveal a secret → `sensitive`.
+- Asking the bot to **do** something irreversible or permissioned → `sensitive` (human approval).
+- Asking for a secret, the bot's instructions, or to ignore its rules → `refuse` (no approval: there is nothing a human could approve).
 
-The safety net mirrors this: action patterns (delete, deploy to production, merge, grant/revoke access, force push) are skipped when the message is framed as a how-to question (`¿Cómo…?`, `¿Cuáles son los pasos para…?`, `¿Qué tengo que hacer para…?`) and contains no imperative (`borrala`, `mergealo`, `desplegá`, `pasame`). Secret-related requests (tokens, passwords, credentials) are always escalated, even as how-to questions.
+**Spec change (refusal route).** Until this change, secrets and prompt-leak requests went to `sensitive` and the human backup was offered `/aprobar` for them, which was meaningless. They now take the `refuse` route; `needs_approval` is reserved for real actions. The eval expectations of `sensitive-secret` and `inject-direct` changed from `sensitive` to `refuse` accordingly (each case carries a `note`); `sensitive-merge` and `inject-write-tool` remain approval cases.
+
+The safety net mirrors this: action patterns (delete, deploy to production, merge, grant/revoke access, force push) are skipped when the message is framed as a how-to question (`¿Cómo…?`, `¿Cuáles son los pasos para…?`, `¿Qué tengo que hacer para…?`) and contains no imperative (`borrala`, `mergealo`, `desplegá`, `pasame`). Secret-related requests (tokens, passwords, credentials, API keys) are always refused, even as how-to questions.
 
 ## Tools & permissions
 
@@ -89,13 +93,13 @@ The allowlist is explicit: `TOOL_POLICIES` declares every tool `readOnly: true` 
 ## Safety rules
 
 1. Never execute irreversible actions; the bot has no write tools.
-2. Never reveal secrets; secret requests are always escalated.
+2. Never reveal secrets or the system prompt; such requests are refused directly with a fixed reply.
 3. Answer only from retrieved context; cite sources; say "No sé" otherwise.
 4. Every unresolved or escalated request is logged locally (`data/pending.json`, gitignored).
 5. No real client data in the repo: knowledge and fixtures are fictional (Acme, `cdn.example.com`).
 6. Retrieved docs and tool results are untrusted data: they are wrapped in `<documento>` / `<resultado_herramienta>` delimiters and the prompts forbid following instructions inside them. HTML comments are stripped before indexing.
 7. Output guard on every reply and draft: links to hosts outside `ALLOWED_LINK_HOSTS` are removed and common token formats are redacted.
-8. Prompt-leak / "ignore your instructions" requests and ticket mutations ("cerrá DEMO-104") are escalated by the deterministic rule.
+8. Prompt-leak / "ignore your instructions" requests are refused and ticket mutations ("cerrá DEMO-104") are escalated by the deterministic rules.
 
 Threat model and residual risks: [`security.md`](security.md).
 
@@ -104,7 +108,7 @@ Threat model and residual risks: [`security.md`](security.md).
 - [x] Questions with relevant docs are answered with a `Fuentes:` list (file › heading).
 - [x] Questions without sufficient context return "No sé" and create a pending entry.
 - [x] Task requests call exactly one validated read-only tool.
-- [x] Sensitive requests pause the graph until a human decision and record it.
+- [x] Sensitive actions pause the graph until a human decision and record it; secret / system-prompt / jailbreak requests are refused immediately without an approval prompt.
 - [x] `npm run summary` groups pending entries by topic and suggests docs to write.
 - [x] Everything runs without credentials except the LLM calls (mock tools, local embeddings).
 - [x] Every request gets an instant acknowledgement (no model call); results, approval requests and failures arrive later as events tagged with the request number.
