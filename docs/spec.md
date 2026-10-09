@@ -36,6 +36,13 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 
 `npm run eval` still calls the graph directly (sequentially), so eval numbers are unaffected by the queue.
 
+## Daily conversation log
+
+- `DailyJsonlLog` (`src/logging/conversation-log.ts`) appends one JSON line per completed request to `data/logs/YYYY-MM-DD.jsonl` (local date of the write; directory `LOG_DIR`; gitignored). Writes are serialized, like the pending store, so concurrent jobs never lose or interleave lines.
+- Fields: `timestamp`, `event` (`request` | `decision`), `requestId`, `requester`, `question`, `route`, `outcome` (`answered` / `no_se` / `clarify` / `refused` / `approval_pending` / `approved` / `rejected` / `failed`; out-of-scope declines log `answered` with route `out_of_scope`), `answer` (full, WITH citations), `draft` (approval requests), `citedSources` (file › heading), `toolCalls` (name, args, read-only flag, `fromMemory`, summarized result), `latencyMs`, `tokens`, `traceId` (same id as in `data/traces.jsonl`), `securityEvent` (`refusal`), `note` (backup note), `error` (failed requests).
+- An approval request logs `approval_pending`; the human decision appends its own `decision` line (`approved` / `rejected`). A log write failure is reported on stderr and never fails the request.
+- CLI `/log` prints today's file path and line count. Retention and privacy: [`security.md`](security.md#daily-conversation-log).
+
 ## Citations
 
 - The graph always produces `[n]` markers and a "Fuentes:" block (evals and logs rely on them). `selectCitedSources` (`src/graph/citations.ts`) keeps only the retrieved sources whose number appears in the reply (original numbers kept, so markers still match) and drops the rest; a reply without markers gets no block. `state.sources` still holds every retrieved chunk; `state.citedSources` the cited ones.
@@ -120,6 +127,7 @@ Threat model and residual risks: [`security.md`](security.md).
 - [x] Every request gets an instant acknowledgement (no model call); results, approval requests and failures arrive later as events tagged with the request number.
 - [x] CI runs typecheck and unit tests on every push and pull request (Node 22.12 and 24), without LLM calls, network-dependent tests or secrets.
 - [x] Questions about the assistant get a fixed capabilities description, never "No sé".
+- [x] Every completed request (and every approval decision) appends one line to the daily log `data/logs/YYYY-MM-DD.jsonl` with the full cited answer, tool calls, latency, tokens and trace id.
 - [x] Follow-ups resolve against the requester's recent tool results; unresolvable references get a clarification question, never a tool call with an invented id.
 - [x] Unit tests cover chunking, ranking, router parsing, safety net, pending store/summary, tools, graph flows and the assistant service (ack, queue limit, done / failed / approval flows) with a fake LLM or fake graph.
 

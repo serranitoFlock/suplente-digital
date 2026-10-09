@@ -5,6 +5,7 @@ dist/
 !.env.example
 data/*.json
 data/*.jsonl
+data/logs/
 .cache/
 models/
 *.onnx

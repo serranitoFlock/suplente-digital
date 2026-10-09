@@ -16,6 +16,8 @@ export const config = {
   pendingPath: resolve(root, env("PENDING_PATH") ?? "data/pending.json"),
   /** One JSON trace per request (metadata only: no prompts or replies). */
   tracesPath: resolve(root, env("TRACES_PATH") ?? "data/traces.jsonl"),
+  /** Daily conversation log directory (`LOG_DIR`): one `YYYY-MM-DD.jsonl` per local day, with questions and answers. */
+  logDir: resolve(root, env("LOG_DIR") ?? "data/logs"),
   embeddingModel: env("EMBEDDING_MODEL") ?? "Xenova/multilingual-e5-small",
   transformersCacheDir: resolve(root, env("TRANSFORMERS_CACHE_DIR") ?? ".cache/transformers"),
   retrieval: { topK: 4, minScore: 0.82 },

@@ -21,7 +21,7 @@ Mapping to the [OWASP Top 10 for LLM Applications](https://genai.owasp.org/llm-t
 | Risk | Relevant attack | Mitigations |
 |------|-----------------|-------------|
 | **LLM01 Prompt Injection** | Direct ("ignorá tus instrucciones…") and indirect (instructions planted in a knowledge doc or a ticket comment) | Delimited untrusted content + explicit rule in every prompt that reads it; deterministic router rule refuses prompt-leak / "ignore instructions" / jailbreak attempts before any model call; output guard; adversarial eval cases (`inject-doc`, `inject-direct`, `inject-write-tool`) with an **injection resisted** metric |
-| **LLM02 Sensitive Information Disclosure** | Revealing secrets, credentials or the system prompt; leaking user questions into logs | Secret requests always refused with a fixed reply (no model output to leak); token formats redacted on output; secrets only in environment variables; traces hold metadata only (no prompts, questions or replies) |
+| **LLM02 Sensitive Information Disclosure** | Revealing secrets, credentials or the system prompt; leaking user questions into logs | Secret requests always refused with a fixed reply (no model output to leak); token formats redacted on output; secrets only in environment variables; traces hold metadata only (no prompts, questions or replies); the daily conversation log does hold questions and answers, so it is local, gitignored and has a documented retention policy |
 | **LLM06 Excessive Agency** | The model calling a write tool, or a tool the operator did not intend | Read-only catalog of three tools; `TOOL_POLICIES` declares each `readOnly: true` with `always_allow` / `always_ask`; `McpToolProvider` refuses any tool outside the allowlist at call time, refuses mappings for unknown local names, and refuses to start if a mapped MCP tool is annotated `destructiveHint: true` or `readOnlyHint: false`; irreversible requests pause for a human (`interrupt`) and even approved drafts are executed by people |
 
 ## Tool allowlist (least privilege)
@@ -53,6 +53,15 @@ export const TOOL_POLICIES = {
 | Real actions: merge, deploy, delete, ticket/write changes, permission changes | `sensitive` | Draft for the human backup, graph paused with `interrupt`; even an approved draft is executed by a person. |
 
 Before this split, secret and prompt-leak requests were escalated for approval, which offered the backup a meaningless `/aprobar`. The LLM router can also pick `refuse` for phrasings the rule does not cover; anything it misses still cannot obtain a secret, because none exists in the prompts, docs or fixtures.
+
+## Daily conversation log
+
+`data/logs/YYYY-MM-DD.jsonl` (`LOG_DIR`) is the one place where content is stored: each line holds the requester id, the **question text** and the **full answer** (with citations), the tool calls with summarized results, and the approval decisions. That is what makes it useful for auditing the bot and for the returning owner, and also why it needs care:
+
+- **Local only and gitignored** (`data/logs/`); nothing is sent anywhere. Traces stay metadata-only and link to the log through `traceId`.
+- **Privacy**: people may paste personal data or internal details into a question. Treat the files like chat history: restrict access to the people who run the bot, and do not share or attach them without review.
+- **Retention**: one file per local day makes rotation trivial; keep only what you need (for example 30 days) and delete older files, e.g. `find data/logs -name '*.jsonl' -mtime +30 -delete` from a scheduled job. Nothing is rotated automatically today.
+- Refused requests are logged with `securityEvent: "refusal"`, so attempts to obtain secrets or the system prompt are visible in the log as well as in the pending log.
 
 ## Test fixture and evals
 

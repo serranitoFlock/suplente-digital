@@ -21,7 +21,7 @@ export function isCapabilitiesQuestion(question: string): boolean {
   return CAPABILITY_PATTERNS.some((pattern) => pattern.test(question));
 }
 
-export const CLI_COMMANDS = "/aprobar <n> [nota], /rechazar <n> [nota], /estado, /pendientes, /stats, /ayuda, /salir";
+export const CLI_COMMANDS = "/aprobar <n> [nota], /rechazar <n> [nota], /estado, /pendientes, /stats, /log, /ayuda, /salir";
 
 export const CAPABILITIES_MESSAGE = `Soy el suplente digital del equipo de arquitectura frontend: cubro a la persona responsable mientras no está.
 

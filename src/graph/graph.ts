@@ -61,10 +61,19 @@ export function buildGraph(deps: GraphDeps, checkpointer: BaseCheckpointSaver = 
 
 export type AgentGraph = ReturnType<typeof buildGraph>;
 
+export interface TurnTrace {
+  traceId: string;
+  inputTokens: number;
+  outputTokens: number;
+  usageReported: boolean;
+}
+
 export interface AgentTurn {
   state: State;
   /** Present when the graph paused for human approval. */
   review?: ReviewRequest;
+  /** Present when the step ran under a tracer: links logs to `data/traces.jsonl`. */
+  trace?: TurnTrace;
 }
 
 const threadConfig = (threadId: string) => ({ configurable: { thread_id: threadId } });
@@ -98,7 +107,7 @@ export async function tracedTurn(
     "gen_ai.conversation.id": threadId,
     "app.step": step,
   };
-  const { result } = await tracer.trace("invoke_agent suplente-digital", attributes, async (root) => {
+  const { result, trace } = await tracer.trace("invoke_agent suplente-digital", attributes, async (root) => {
     const turn = await run();
     root.setAttributes({
       "app.route": turn.state.route ?? "unknown",
@@ -107,7 +116,8 @@ export async function tracedTurn(
     });
     return turn;
   });
-  return result;
+  const { traceId, inputTokens, outputTokens, usageReported } = trace.summary;
+  return { ...result, trace: { traceId, inputTokens, outputTokens, usageReported } };
 }
 
 export async function resumeAgent(graph: AgentGraph, decision: ReviewDecision, threadId: string): Promise<AgentTurn> {

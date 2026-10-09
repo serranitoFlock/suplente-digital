@@ -2,6 +2,7 @@ import { clearLine, createInterface, cursorTo } from "node:readline";
 import { HELP_TEXT, parseCommand, renderJobs } from "./cli-commands.js";
 import { config, loadCostRates, loadLlmSettings } from "./config.js";
 import { buildGraph } from "./graph/graph.js";
+import { DailyJsonlLog } from "./logging/conversation-log.js";
 import { createLlm, describeLlm } from "./llm.js";
 import { computeStats, renderStats } from "./observability/stats.js";
 import { JsonlTraceExporter, Tracer } from "./observability/tracing.js";
@@ -18,6 +19,7 @@ async function main(): Promise<void> {
   const tracer = new Tracer({ exporters: [new JsonlTraceExporter(config.tracesPath)], costRates: loadCostRates() });
 
   const pending = new PendingStore(config.pendingPath);
+  const log = new DailyJsonlLog(config.logDir);
   const tools = await createToolProvider(config.mcp);
   const retriever = await Retriever.load(
     config.indexPath,
@@ -36,6 +38,7 @@ async function main(): Promise<void> {
     threadPrefix: `cli-${Date.now()}`,
     memory: new InMemoryConversationMemory(config.assistant.memoryTurns),
     showCitations: config.presentation.showCitations,
+    log,
   });
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "vos> " });
   let closing = false;
@@ -89,6 +92,12 @@ async function main(): Promise<void> {
         return;
       case "stats":
         print(renderStats(computeStats(tracer.summaries)));
+        return;
+      case "log":
+        void log
+          .countToday()
+          .then((count) => print(`Log de hoy: ${log.todayPath()} (${count} ${count === 1 ? "línea" : "líneas"})`))
+          .catch((error: unknown) => print(`No pude leer el log: ${error instanceof Error ? error.message : error}`));
         return;
       case "help":
         print(HELP_TEXT);

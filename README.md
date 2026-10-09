@@ -189,7 +189,7 @@ Un adaptador para Teams (o Slack) se conectaría así:
 
 Para producción, reemplazar la cola en proceso y `MemorySaver` por implementaciones persistentes (ver T3 en la lista de tareas) para que los trabajos sobrevivan a los reinicios.
 
-Comandos de la CLI: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/stats`, `/ayuda`, `/salir`. Los resultados se imprimen etiquetados con su número y el prompt se vuelve a dibujar, de modo que se puede seguir escribiendo mientras se procesan las preguntas anteriores. Con `/salir` o al terminar la entrada, la CLI espera a que finalicen los trabajos en curso; los trabajos que siguen esperando aprobación se informan y no se ejecuta nada.
+Comandos de la CLI: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/stats`, `/log`, `/ayuda`, `/salir`. Los resultados se imprimen etiquetados con su número y el prompt se vuelve a dibujar, de modo que se puede seguir escribiendo mientras se procesan las preguntas anteriores. Con `/salir` o al terminar la entrada, la CLI espera a que finalicen los trabajos en curso; los trabajos que siguen esperando aprobación se informan y no se ejecuta nada.
 
 ## Citas y fuentes
 
@@ -204,6 +204,12 @@ Las preguntas sobre el propio asistente ("¿qué podés hacer?", "¿cómo funcio
 El servicio recuerda los últimos turnos de cada solicitante (`MEMORY_TURNS`, por defecto 6; `0` la desactiva): la pregunta, la ruta, la respuesta y los resultados estructurados de las herramientas. Así, un seguimiento como "es sobre el primero que me pasaste, ¿qué pasó?" se resuelve contra la lista de pipelines de la consulta anterior. Las consultas de un mismo solicitante se procesan en orden.
 
 El bot nunca adivina: si la referencia no se puede resolver con certeza (no hay consulta previa, hay varios candidatos o el número no existe), responde con una pregunta breve de aclaración (ruta `clarify`) en lugar de consultar una herramienta con un identificador inventado. La CLI usa un único solicitante local; la API del servicio recibe `requester`.
+
+## Log diario de conversaciones
+
+Cada pedido completado agrega una línea JSON a `data/logs/AAAA-MM-DD.jsonl` (fecha local; carpeta configurable con `LOG_DIR`; ignorada por git): fecha y hora, número de consulta, solicitante, pregunta, ruta, resultado (`answered`, `no_se`, `clarify`, `refused`, `approval_pending`, `approved`, `rejected`, `failed`), respuesta completa **con** citas, fuentes citadas, herramientas usadas (nombre, argumentos, solo lectura y un resumen del resultado), latencia, tokens e id del trace correspondiente en `data/traces.jsonl`. Las decisiones de aprobación agregan su propia línea.
+
+En la CLI, `/log` muestra la ruta del archivo de hoy y cuántas líneas tiene. A diferencia de los traces, este log **sí guarda el texto de las preguntas y respuestas**: queda solo en la máquina local, conviene restringir el acceso y borrar los archivos viejos (por ejemplo, conservar 30 días). Detalles en [`docs/security.md`](docs/security.md#daily-conversation-log).
 
 ## Observabilidad y costo
 
@@ -270,4 +276,4 @@ Modelo de amenazas completo (lethal trifecta, OWASP LLM01/02/06, riesgos residua
 - Los pedidos de secretos o credenciales, del prompt del sistema o los intentos de que el bot ignore sus instrucciones se rechazan de inmediato con una respuesta fija, sin ofrecer `/aprobar` (no hay nada que aprobar), y quedan registrados como evento de seguridad.
 - Los pedidos de merge, deploy a producción, eliminación o cambio de permisos se derivan mediante una regla determinística, independientemente del ruteo del modelo; en cambio, las preguntas sobre *cómo* realizar esos procedimientos ("¿Cómo despliego a producción?") se responden a partir de los documentos. Todo lo relacionado con secretos se rechaza siempre.
 - Las respuestas provienen solo de documentos recuperados, con citas; de lo contrario, el bot responde "No sé" y registra la pregunta.
-- `data/` (índice y registro de pendientes) y `.env` están ignorados por git.
+- `data/` (índice, registro de pendientes, traces y log diario de conversaciones) y `.env` están ignorados por git.

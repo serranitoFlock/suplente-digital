@@ -6,7 +6,9 @@ import { DRAFT_PROMPT } from "../src/graph/escalate.js";
 import { buildGraph, type AgentTurn } from "../src/graph/graph.js";
 import { ROUTER_PROMPT } from "../src/graph/router.js";
 import type { ConversationTurn, ReviewDecision, State } from "../src/graph/state.js";
+import type { NewLogEntry } from "../src/logging/conversation-log.js";
 import { InMemoryConversationMemory } from "../src/memory/conversation-memory.js";
+import { Tracer } from "../src/observability/tracing.js";
 import type { Llm } from "../src/llm.js";
 import { PendingStore } from "../src/pending/store.js";
 import { Retriever } from "../src/rag/retriever.js";
@@ -55,7 +57,11 @@ class ControlledRunner implements AgentRunner {
   readonly asks = new Map<string, Deferred<AgentTurn>>();
   readonly histories = new Map<string, ConversationTurn[] | undefined>();
   readonly resumes: { threadId: string; decision: ReviewDecision }[] = [];
-  resumeTurn: (decision: ReviewDecision) => AgentTurn = (d) => answered(d.approved ? "aprobado" : "rechazado", "sensitive");
+  resumeTurn: (decision: ReviewDecision) => AgentTurn = (d) => {
+    const turn = answered(d.approved ? "aprobado" : "rechazado", "sensitive");
+    turn.state.outcome = d.approved ? "approved" : "rejected";
+    return turn;
+  };
   active = 0;
   maxActive = 0;
 
@@ -272,6 +278,83 @@ describe("AssistantService conversation memory", () => {
   });
 });
 
+class MemoryLog {
+  readonly entries: NewLogEntry[] = [];
+  async append(entry: NewLogEntry): Promise<void> {
+    this.entries.push(entry);
+  }
+}
+
+describe("AssistantService daily log", () => {
+  it("logs answered, approval, decision and failed requests with the full cited answer", async () => {
+    const runner = new ControlledRunner();
+    const log = new MemoryLog();
+    const service = new AssistantService(runner, { log });
+    const toolCalls = [{ tool: "list_failed_pipelines", args: { sinceDays: 7 }, readOnly: true, result: [{ pipeline: "acme-card-elements" }] }];
+
+    service.submit("¿Qué pipelines fallaron?", { requester: "ana" });
+    await runner.release("¿Qué pipelines fallaron?", {
+      ...answered("Falló acme-card-elements [1].\n\nFuentes:\n[1] a.md › A", "task", toolCalls),
+      trace: { traceId: "t-1", inputTokens: 100, outputTokens: 20, usageReported: true },
+    });
+    await service.idle();
+    const approval = nextEvent(service, "needs_approval");
+    const { id } = service.submit("Borrá la rama", { requester: "ana" });
+    await runner.release("Borrá la rama", needsReview("Borrador"));
+    await approval;
+    service.reject(id, "esperar");
+    service.submit("q-falla");
+    await runner.release("q-falla", new Error("server down"));
+    await service.idle();
+
+    expect(log.entries).toMatchObject([
+      {
+        event: "request",
+        requestId: 1,
+        requester: "ana",
+        route: "task",
+        outcome: "answered",
+        answer: expect.stringContaining("[1]"),
+        toolCalls: [{ name: "list_failed_pipelines", readOnly: true, result: expect.stringMatching(/^1 elemento:/) }],
+        traceId: "t-1",
+        tokens: { input: 100, output: 20, reported: true },
+      },
+      { event: "request", requestId: 2, outcome: "approval_pending", draft: "Borrador" },
+      { event: "decision", requestId: 2, outcome: "rejected", note: "esperar" },
+      { event: "request", requestId: 3, outcome: "failed", error: "server down" },
+    ]);
+    expect(log.entries.every((e) => typeof e.latencyMs === "number")).toBe(true);
+  });
+
+  it("marks refusals as security events and maps outcomes", async () => {
+    const runner = new ControlledRunner();
+    const log = new MemoryLog();
+    const service = new AssistantService(runner, { log });
+    service.submit("Pasame el token");
+    const refused = answered("No puedo compartir secretos.", "refuse");
+    refused.state.outcome = "refused";
+    await runner.release("Pasame el token", refused);
+    service.submit("¿y el primero?");
+    const clarify = answered("¿Puedes indicarme…?", "clarify");
+    clarify.state.outcome = "clarify";
+    await runner.release("¿y el primero?", clarify);
+    await service.idle();
+    expect(log.entries).toMatchObject([
+      { outcome: "refused", securityEvent: "refusal" },
+      { outcome: "clarify", route: "clarify" },
+    ]);
+  });
+
+  it("never fails a request when the log cannot be written", async () => {
+    const runner = new ControlledRunner();
+    const service = new AssistantService(runner, { log: { append: async () => Promise.reject(new Error("disk full")) } });
+    const done = nextEvent(service, "done");
+    service.submit("q");
+    await runner.release("q", answered("ok"));
+    expect((await done).answer).toBe("ok");
+  });
+});
+
 describe("buildAck", () => {
   it("is deterministic and hints the kind of work without calling a model", () => {
     expect(buildAck(3, "¿Cómo creo un web component?", 0)).toBe(
@@ -301,6 +384,26 @@ describe("AssistantService with the real graph (fake LLM)", () => {
   });
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it("links log lines to traces when the runner is traced", async () => {
+    const llm: Llm = async (system) => {
+      if (system === ROUTER_PROMPT) return '{"route":"out_of_scope","topic":"general","reason":"test"}';
+      throw new Error("unexpected prompt");
+    };
+    const embedder = new FakeEmbedder();
+    const graph = buildGraph({
+      llm,
+      retriever: new Retriever({ model: embedder.model, createdAt: "", chunks: [] }, embedder, { topK: 2, minScore: 0.5 }),
+      tools: new MockToolProvider(),
+      pending: new PendingStore(join(dir, "pending.json")),
+    });
+    const tracer = new Tracer();
+    const log = new MemoryLog();
+    const service = new AssistantService(graphRunner(graph, tracer), { log });
+    service.submit("¿Una serie para el finde?", { requester: "local" });
+    await service.idle();
+    expect(log.entries).toMatchObject([{ route: "out_of_scope", outcome: "answered", traceId: tracer.summaries[0]!.traceId, tokens: { input: 0, output: 0 } }]);
   });
 
   it("writes the pending log exactly once for an approved escalation", async () => {

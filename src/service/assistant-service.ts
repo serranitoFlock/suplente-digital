@@ -4,6 +4,7 @@ import type { Tracer } from "../observability/tracing.js";
 import { detectSensitive } from "../graph/router.js";
 import type { ConversationTurn, ReviewDecision, Route } from "../graph/state.js";
 import { InMemoryConversationMemory, toConversationTurn, type ConversationMemory } from "../memory/conversation-memory.js";
+import { summarizeToolResult, type ConversationLogSink, type LogOutcome, type NewLogEntry } from "../logging/conversation-log.js";
 import { formatAnswerForUser } from "../presentation/format-answer.js";
 import { JobQueue } from "./job-queue.js";
 
@@ -86,6 +87,8 @@ export interface AssistantServiceOptions {
   memory?: ConversationMemory;
   /** Show `[n]` markers and the cited sources to the requester (`SHOW_CITATIONS`, default false). */
   showCitations?: boolean;
+  /** Daily conversation log: one line per completed request and per approval decision. */
+  log?: ConversationLogSink;
 }
 
 /** Conversation id used when a request has no requester (e.g. a single local CLI user). */
@@ -122,6 +125,8 @@ interface Job extends JobView {
   threadId: string;
   /** Memory and ordering key; absent for anonymous requests (no memory, no ordering). */
   conversationId?: string;
+  /** Set when the human backup decides; the resumed step logs it as a `decision` line. */
+  decision?: ReviewDecision;
 }
 
 export class AssistantService extends EventEmitter<AssistantEvents> {
@@ -130,6 +135,7 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
   readonly #threadPrefix: string;
   readonly #memory: ConversationMemory;
   readonly #showCitations: boolean;
+  readonly #log: ConversationLogSink | undefined;
   readonly #jobs = new Map<number, Job>();
   /** Last scheduled step per conversation: requests from the same requester run in order. */
   readonly #tails = new Map<string, Promise<void>>();
@@ -144,6 +150,7 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
     this.#threadPrefix = options.threadPrefix ?? `job-${Date.now()}`;
     this.#memory = options.memory ?? new InMemoryConversationMemory();
     this.#showCitations = options.showCitations ?? false;
+    this.#log = options.log;
   }
 
   /** Accepts a request and returns its acknowledgement immediately; the work runs in the background. */
@@ -200,6 +207,7 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
     if (job.status !== "needs_approval") return "not_pending";
     // Flip the status synchronously so a second approve/reject cannot resume (and log) twice.
     this.#update(job, { status: "queued" });
+    job.decision = decision;
     this.#schedule(job, () => this.#runner.resume(decision, job.threadId));
     return "accepted";
   }
@@ -234,26 +242,51 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
 
   async #process(job: Job, step: () => Promise<AgentTurn>): Promise<void> {
     this.#update(job, { status: "running" });
+    const startedAt = Date.now();
     let turn: AgentTurn;
     try {
       turn = await step();
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       this.#update(job, { status: "failed", error: detail });
+      await this.#writeLog(job, { outcome: "failed", latencyMs: Date.now() - startedAt, error: detail });
       this.emit("failed", { ...eventBase(job), message: failureMessage(job.id), error: detail });
       return;
     }
+    const latencyMs = Date.now() - startedAt;
 
     if (turn.review) {
       this.#update(job, { status: "needs_approval", route: turn.state.route, draft: turn.review.draft });
+      await this.#writeLog(job, { ...turnLogFields(turn), outcome: "approval_pending", draft: turn.review.draft, latencyMs });
       this.emit("needs_approval", { ...eventBase(job), draft: turn.review.draft });
       return;
     }
     const rawAnswer = turn.state.answer ?? "";
     const answer = formatAnswerForUser(rawAnswer, { showCitations: this.#showCitations });
     await this.#remember(job, turn);
+    await this.#writeLog(job, { ...turnLogFields(turn), outcome: logOutcome(turn), answer: rawAnswer, latencyMs });
     this.#update(job, { status: "done", route: turn.state.route, answer });
     this.emit("done", { ...eventBase(job), route: turn.state.route, answer, rawAnswer });
+  }
+
+  /** Appends one daily-log line; a logging failure never fails the request. */
+  async #writeLog(job: Job, fields: Partial<NewLogEntry> & Pick<NewLogEntry, "outcome" | "latencyMs">): Promise<void> {
+    if (!this.#log) return;
+    const decision = job.decision;
+    try {
+      await this.#log.append({
+        event: decision ? "decision" : "request",
+        requestId: job.id,
+        requester: job.requester,
+        question: job.question,
+        citedSources: [],
+        toolCalls: [],
+        ...fields,
+        ...(decision?.note ? { note: decision.note } : {}),
+      });
+    } catch (error) {
+      console.warn(`[log] could not write the log line of job #${job.id}: ${error instanceof Error ? error.message : error}`);
+    }
   }
 
   /** Memory is appended only when a job completes, so a follow-up sees finished turns only. */
@@ -271,10 +304,41 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
   }
 }
 
+function logOutcome({ state }: AgentTurn): LogOutcome {
+  switch (state.outcome) {
+    case "unknown":
+      return "no_se";
+    case "clarify":
+    case "refused":
+    case "approved":
+    case "rejected":
+      return state.outcome;
+    default:
+      return "answered"; // answered, out_of_scope (polite decline; the route tells them apart)
+  }
+}
+
+function turnLogFields(turn: AgentTurn): Partial<NewLogEntry> {
+  const { state, trace } = turn;
+  return {
+    route: state.route,
+    citedSources: (state.citedSources ?? []).map((s) => `${s.source} › ${s.heading}`),
+    toolCalls: (state.toolCalls ?? []).map((call) => ({
+      name: call.tool,
+      args: call.args,
+      readOnly: call.readOnly,
+      ...(call.fromMemory ? { fromMemory: true } : {}),
+      result: summarizeToolResult(call.result),
+    })),
+    ...(trace ? { traceId: trace.traceId, tokens: { input: trace.inputTokens, output: trace.outputTokens, reported: trace.usageReported } } : {}),
+    ...(state.route === "refuse" ? { securityEvent: "refusal" as const } : {}),
+  };
+}
+
 function eventBase({ id, question, requester }: Job): JobEventBase {
   return { id, question, requester };
 }
 
-function toView({ threadId: _threadId, conversationId: _conversationId, ...view }: Job): JobView {
+function toView({ threadId: _threadId, conversationId: _conversationId, decision: _decision, ...view }: Job): JobView {
   return { ...view };
 }

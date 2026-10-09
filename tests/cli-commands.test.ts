@@ -21,6 +21,7 @@ describe("parseCommand", () => {
     expect(parseCommand("/salir")).toEqual({ kind: "quit" });
     expect(parseCommand("/ayuda")).toEqual({ kind: "help" });
     expect(parseCommand("/stats")).toEqual({ kind: "stats" });
+    expect(parseCommand("/log")).toEqual({ kind: "log" });
     expect(parseCommand("/foo").kind).toBe("invalid");
   });
 });
