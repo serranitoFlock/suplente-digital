@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { resolveLlmSettings, type LlmSettings } from "./llm.js";
 import { resolveCostRates, type CostRates } from "./observability/tracing.js";
 import { resolveMemoryTurns } from "./memory/conversation-memory.js";
+import { resolveShowCitations } from "./presentation/format-answer.js";
 import { resolveAllowedLinkHosts } from "./security/guards.js";
 import { resolveConcurrency } from "./service/assistant-service.js";
 
@@ -28,6 +29,8 @@ export const config = {
     concurrency: resolveConcurrency(process.env.ASSISTANT_CONCURRENCY),
     memoryTurns: resolveMemoryTurns(process.env.MEMORY_TURNS),
   },
+  /** Show `[n]` markers and the cited sources in replies (`SHOW_CITATIONS`, default false); logs always keep them. */
+  presentation: { showCitations: resolveShowCitations(process.env.SHOW_CITATIONS) },
   mcp: {
     command: env("MCP_SERVER_COMMAND"),
     args: env("MCP_SERVER_ARGS")?.split(/\s+/) ?? [],

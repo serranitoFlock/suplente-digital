@@ -153,9 +153,7 @@ suplente> Recibido 👀 (consulta #1). Lo estoy revisando y te respondo en cuant
 vos> Mergeá el MR de acme-card a main
 suplente> Recibido 👀 (consulta #2). Parece un pedido que necesita aprobación del backup humano: preparo un borrador y te aviso. Hay 1 consulta antes que la tuya.
 
-suplente [#1 · question]> Primero mirá la consola: un 404 sobre bundle.js indica ... [1]
-Fuentes:
-[1] troubleshooting-componente-no-carga.md › Troubleshooting: el componente no carga > 1. Revisar la consola del navegador
+suplente [#1 · question]> Primero mirá la consola: un 404 sobre bundle.js indica ...
 
 [#2] Pedido sensible: requiere aprobación del backup humano. El bot no ejecuta la acción.
 Borrador: ...
@@ -179,7 +177,7 @@ El servicio emite eventos tipados; los transportes solo deciden cómo entregarlo
 
 | Evento | Payload | Entrega típica |
 |-------|---------|------------------|
-| `done` | `id`, `requester`, `route`, `answer` | Respuesta de seguimiento a quien hizo el pedido |
+| `done` | `id`, `requester`, `route`, `answer` (para el usuario, según `SHOW_CITATIONS`), `rawAnswer` (completa, con citas) | Respuesta de seguimiento a quien hizo el pedido |
 | `needs_approval` | `id`, `requester`, `draft` | Tarjeta para el suplente humano con botones para aprobar / rechazar |
 | `failed` | `id`, `requester`, `message` amigable, `error` técnico | Respuesta amigable; `error` va solo a los logs |
 
@@ -192,6 +190,10 @@ Un adaptador para Teams (o Slack) se conectaría así:
 Para producción, reemplazar la cola en proceso y `MemorySaver` por implementaciones persistentes (ver T3 en la lista de tareas) para que los trabajos sobrevivan a los reinicios.
 
 Comandos de la CLI: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/stats`, `/ayuda`, `/salir`. Los resultados se imprimen etiquetados con su número y el prompt se vuelve a dibujar, de modo que se puede seguir escribiendo mientras se procesan las preguntas anteriores. Con `/salir` o al terminar la entrada, la CLI espera a que finalicen los trabajos en curso; los trabajos que siguen esperando aprobación se informan y no se ejecuta nada.
+
+## Citas y fuentes
+
+El grafo siempre cita con marcadores `[n]` y agrega un bloque "Fuentes:" con **solo** los documentos citados en la respuesta (los recuperados que no se citan se descartan). Mostrarlos o no es una decisión de presentación: con `SHOW_CITATIONS=false` (por defecto) la respuesta al usuario sale sin marcadores ni bloque de fuentes; con `SHOW_CITATIONS=true` se muestran los marcadores y las fuentes citadas (archivo › sección). Las evaluaciones y el log diario conservan siempre la respuesta completa con sus citas.
 
 ## Qué puede hacer el bot
 

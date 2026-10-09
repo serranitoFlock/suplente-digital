@@ -4,6 +4,7 @@ import type { Tracer } from "../observability/tracing.js";
 import { detectSensitive } from "../graph/router.js";
 import type { ConversationTurn, ReviewDecision, Route } from "../graph/state.js";
 import { InMemoryConversationMemory, toConversationTurn, type ConversationMemory } from "../memory/conversation-memory.js";
+import { formatAnswerForUser } from "../presentation/format-answer.js";
 import { JobQueue } from "./job-queue.js";
 
 /**
@@ -51,7 +52,10 @@ interface JobEventBase {
 
 export interface DoneEvent extends JobEventBase {
   route?: Route;
+  /** User-facing text (citations shown or hidden according to `showCitations`). */
   answer: string;
+  /** Full graph answer with `[n]` markers and the "Fuentes:" block (for logs and audits). */
+  rawAnswer: string;
 }
 
 export interface NeedsApprovalEvent extends JobEventBase {
@@ -80,6 +84,8 @@ export interface AssistantServiceOptions {
   threadPrefix?: string;
   /** Short-term memory per requester (default: in memory, last 6 turns). */
   memory?: ConversationMemory;
+  /** Show `[n]` markers and the cited sources to the requester (`SHOW_CITATIONS`, default false). */
+  showCitations?: boolean;
 }
 
 /** Conversation id used when a request has no requester (e.g. a single local CLI user). */
@@ -123,6 +129,7 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
   readonly #queue: JobQueue;
   readonly #threadPrefix: string;
   readonly #memory: ConversationMemory;
+  readonly #showCitations: boolean;
   readonly #jobs = new Map<number, Job>();
   /** Last scheduled step per conversation: requests from the same requester run in order. */
   readonly #tails = new Map<string, Promise<void>>();
@@ -136,6 +143,7 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
     this.#queue = new JobQueue(options.concurrency ?? 1);
     this.#threadPrefix = options.threadPrefix ?? `job-${Date.now()}`;
     this.#memory = options.memory ?? new InMemoryConversationMemory();
+    this.#showCitations = options.showCitations ?? false;
   }
 
   /** Accepts a request and returns its acknowledgement immediately; the work runs in the background. */
@@ -241,10 +249,11 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
       this.emit("needs_approval", { ...eventBase(job), draft: turn.review.draft });
       return;
     }
-    const answer = turn.state.answer ?? "";
+    const rawAnswer = turn.state.answer ?? "";
+    const answer = formatAnswerForUser(rawAnswer, { showCitations: this.#showCitations });
     await this.#remember(job, turn);
     this.#update(job, { status: "done", route: turn.state.route, answer });
-    this.emit("done", { ...eventBase(job), route: turn.state.route, answer });
+    this.emit("done", { ...eventBase(job), route: turn.state.route, answer, rawAnswer });
   }
 
   /** Memory is appended only when a job completes, so a follow-up sees finished turns only. */

@@ -39,7 +39,7 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-const baseState = { history: [], reference: { kind: "none" as const }, toolCalls: [] };
+const baseState = { history: [], reference: { kind: "none" as const }, toolCalls: [], citedSources: [] };
 
 const answered = (answer: string, route: State["route"] = "question", toolCalls: State["toolCalls"] = []): AgentTurn => ({
   state: { ...baseState, question: "", route, topic: "t", routeReason: "", answer, sources: [], draft: "", outcome: "answered", toolCalls },
@@ -106,8 +106,19 @@ describe("AssistantService", () => {
 
     const done = nextEvent(service, "done");
     await runner.release("¿Cómo publico una librería?", answered("Con changesets [1]."));
-    expect(await done).toMatchObject({ id: 1, requester: "ana", route: "question", answer: "Con changesets [1]." });
-    expect(service.status(id)).toMatchObject({ status: "done", answer: "Con changesets [1]." });
+    // Citations are hidden from the requester by default (SHOW_CITATIONS=false) but kept in rawAnswer.
+    expect(await done).toMatchObject({ id: 1, requester: "ana", route: "question", answer: "Con changesets.", rawAnswer: "Con changesets [1]." });
+    expect(service.status(id)).toMatchObject({ status: "done", answer: "Con changesets." });
+  });
+
+  it("shows only the cited sources when showCitations is on", async () => {
+    const runner = new ControlledRunner();
+    const service = new AssistantService(runner, { showCitations: true });
+    const done = nextEvent(service, "done");
+    service.submit("¿Cómo publico?");
+    const raw = "Con changesets [2].\n\nFuentes:\n[2] publicar.md › Pasos";
+    await runner.release("¿Cómo publico?", answered(raw));
+    expect(await done).toMatchObject({ answer: raw, rawAnswer: raw });
   });
 
   it("assigns unique, increasing ids", () => {

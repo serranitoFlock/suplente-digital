@@ -78,7 +78,10 @@ export const AgentState = Annotation.Root({
   topic: Annotation<string>,
   routeReason: Annotation<string>,
   answer: Annotation<string>,
+  /** Retrieved sources (all chunks passed to the model). */
   sources: Annotation<Source[]>,
+  /** Retrieved sources the reply actually cites (`[n]` markers); the only ones listed under "Fuentes:". */
+  citedSources: Annotation<(Source & { n: number })[]>,
   draft: Annotation<string>,
   outcome: Annotation<Outcome>,
 });

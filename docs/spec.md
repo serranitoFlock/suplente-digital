@@ -36,6 +36,11 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 
 `npm run eval` still calls the graph directly (sequentially), so eval numbers are unaffected by the queue.
 
+## Citations
+
+- The graph always produces `[n]` markers and a "Fuentes:" block (evals and logs rely on them). `selectCitedSources` (`src/graph/citations.ts`) keeps only the retrieved sources whose number appears in the reply (original numbers kept, so markers still match) and drops the rest; a reply without markers gets no block. `state.sources` still holds every retrieved chunk; `state.citedSources` the cited ones.
+- Showing them is a presentation decision, not a graph one: `formatAnswerForUser` (`src/presentation/format-answer.ts`), applied by `AssistantService` to `done` events, strips the markers (outside inline code) and the "Fuentes:" block and tidies the leftover spacing/punctuation when `SHOW_CITATIONS=false` (default); with `true` the reply keeps the markers and the cited sources. The event also carries `rawAnswer` (full text, with citations) for logs.
+
 ## Conversation memory (short-term)
 
 - The service keeps the last N completed turns per requester (`MEMORY_TURNS`, default 6; `0` disables it) behind the `ConversationMemory` interface (`src/memory/conversation-memory.ts`; in memory today, swappable for a persistent store). Each turn holds the user text, the route, the final answer and the structured tool results (e.g. the list of failed pipelines).
@@ -58,7 +63,7 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 
 | Route | Trigger | Behavior |
 |-------|---------|----------|
-| `question` | Knowledge/procedure question | Retrieve top-k chunks; answer only from context with `[n]` citations; otherwise reply "No sé" and log pending |
+| `question` | Knowledge/procedure question | Retrieve top-k chunks; answer only from context with `[n]` citations; the "Fuentes:" block lists only the cited sources; otherwise reply "No sé" and log pending |
 | `task` | Live operational info (tickets, pipelines) | Model picks one read-only tool (validated with zod); result summarized |
 | `sensitive` | A real action: merge, deploy, delete, ticket/write changes, permission changes | Draft reply → `interrupt` → human approves/rejects → logged |
 | `refuse` | Requests for secrets/credentials or the system prompt, or attempts to override the instructions | Fixed, polite Spanish refusal; no model call when the rule matches, no approval prompt; logged as a security event (`security_refusal` in the pending log, `app.security_event` on the trace) |
@@ -106,7 +111,7 @@ Threat model and residual risks: [`security.md`](security.md).
 
 ## Acceptance criteria
 
-- [x] Questions with relevant docs are answered with a `Fuentes:` list (file › heading).
+- [x] Questions with relevant docs are answered with a `Fuentes:` list (file › heading) that holds only the sources the reply cites; the requester sees markers and sources only with `SHOW_CITATIONS=true`.
 - [x] Questions without sufficient context return "No sé" and create a pending entry.
 - [x] Task requests call exactly one validated read-only tool.
 - [x] Sensitive actions pause the graph until a human decision and record it; secret / system-prompt / jailbreak requests are refused immediately without an approval prompt.

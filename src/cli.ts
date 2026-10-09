@@ -35,6 +35,7 @@ async function main(): Promise<void> {
     concurrency: config.assistant.concurrency,
     threadPrefix: `cli-${Date.now()}`,
     memory: new InMemoryConversationMemory(config.assistant.memoryTurns),
+    showCitations: config.presentation.showCitations,
   });
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "vos> " });
   let closing = false;

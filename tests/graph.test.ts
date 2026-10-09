@@ -118,6 +118,15 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
     expect(await pending.list()).toEqual([]);
   });
 
+  it("lists only the sources the reply cites and none when it cites nothing", async () => {
+    const cited = await askAgent(graphFor({ route: "question", answer: "Lo define el manifiesto [1]." }), "¿Qué bundle carga el manifiesto del CDN?", "s1");
+    expect(cited.state.citedSources).toMatchObject([{ n: 1, source: "cdn.md" }]);
+    const uncited = await askAgent(graphFor({ route: "question", answer: "Lo define el manifiesto." }), "¿Qué bundle carga el manifiesto del CDN?", "s2");
+    expect(uncited.state.sources.length).toBeGreaterThan(0);
+    expect(uncited.state.citedSources).toEqual([]);
+    expect(uncited.state.answer).not.toContain("Fuentes:");
+  });
+
   it('says "no sé" and logs a pending item when the model lacks context', async () => {
     const graph = graphFor({ route: "question", answer: "NO_SE" });
     const { state } = await askAgent(graph, "¿Qué bundle carga el manifiesto del CDN?", "t2");

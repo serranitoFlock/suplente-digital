@@ -1,5 +1,6 @@
 import type { Llm } from "../llm.js";
 import { renderHistory } from "../memory/conversation-memory.js";
+import { formatCitedSources, selectCitedSources } from "./citations.js";
 import type { ScoredChunk } from "../rag/retriever.js";
 import { sanitizeOutput, wrapUntrusted } from "../security/guards.js";
 import { NO_ANSWER, type ConversationTurn, type GraphDeps, type Source, type State, type Update } from "./state.js";
@@ -22,16 +23,13 @@ export function formatContext(chunks: ScoredChunk[]): string {
     .join("\n\n");
 }
 
-export function formatSources(sources: Source[]): string {
-  return sources.map((s, i) => `[${i + 1}] ${s.source} › ${s.heading}`).join("\n");
-}
-
 export function makeAnswerNode({ llm, retriever, pending, allowedLinkHosts }: Pick<GraphDeps, "llm" | "retriever" | "pending" | "allowedLinkHosts">) {
   const unknown = async (state: State): Promise<Update> => {
     await pending.append({ question: state.question, topic: state.topic, reason: "unknown" });
     return {
       outcome: "unknown",
       sources: [],
+      citedSources: [],
       answer: `${NO_ANSWER} Dejé la pregunta registrada para cuando vuelva la persona responsable.`,
     };
   };
@@ -44,7 +42,10 @@ export function makeAnswerNode({ llm, retriever, pending, allowedLinkHosts }: Pi
     if (!reply || reply.includes(NO_ANSWER_TOKEN)) return unknown(state);
 
     const sources = chunks.map(({ source, heading, score }) => ({ source, heading, score }));
-    return { outcome: "answered", sources, answer: `${reply}\n\nFuentes:\n${formatSources(sources)}` };
+    // Only sources the reply actually cites are listed (original numbers kept so markers still match).
+    const citedSources = selectCitedSources(sources, reply);
+    const footer = citedSources.length > 0 ? `\n\nFuentes:\n${formatCitedSources(citedSources)}` : "";
+    return { outcome: "answered", sources, citedSources, answer: `${reply}${footer}` };
   };
 }
 
