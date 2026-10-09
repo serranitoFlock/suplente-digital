@@ -2,6 +2,7 @@ import { Command, END, isGraphInterrupt, MemorySaver, START, StateGraph, type Ba
 import { withSpan, type Tracer } from "../observability/tracing.js";
 import type { ToolProvider } from "../tools/types.js";
 import { makeAnswerNode } from "./answer.js";
+import { capabilitiesNode } from "./capabilities.js";
 import { clarifyNode, makeDraftNode, makeHumanReviewNode, makeRefuseNode, outOfScopeNode } from "./escalate.js";
 import { makeRouterNode } from "./router.js";
 import { AgentState, type ConversationTurn, type GraphDeps, type ReviewDecision, type ReviewRequest, type State } from "./state.js";
@@ -36,6 +37,7 @@ export function buildGraph(deps: GraphDeps, checkpointer: BaseCheckpointSaver = 
     .addNode("out_of_scope", traced("out_of_scope", outOfScopeNode))
     .addNode("clarify", traced("clarify", clarifyNode))
     .addNode("refuse", traced("refuse", makeRefuseNode(nodeDeps)))
+    .addNode("capabilities", traced("capabilities", capabilitiesNode))
     .addEdge(START, "router")
     .addConditionalEdges("router", (state) => state.route, {
       question: "rag_answer",
@@ -44,6 +46,7 @@ export function buildGraph(deps: GraphDeps, checkpointer: BaseCheckpointSaver = 
       out_of_scope: "out_of_scope",
       clarify: "clarify",
       refuse: "refuse",
+      capabilities: "capabilities",
     })
     .addEdge("draft_escalation", "human_review")
     .addEdge("rag_answer", END)
@@ -52,6 +55,7 @@ export function buildGraph(deps: GraphDeps, checkpointer: BaseCheckpointSaver = 
     .addEdge("out_of_scope", END)
     .addEdge("clarify", END)
     .addEdge("refuse", END)
+    .addEdge("capabilities", END)
     .compile({ checkpointer });
 }
 

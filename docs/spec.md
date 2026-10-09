@@ -63,6 +63,7 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 | `sensitive` | A real action: merge, deploy, delete, ticket/write changes, permission changes | Draft reply → `interrupt` → human approves/rejects → logged |
 | `refuse` | Requests for secrets/credentials or the system prompt, or attempts to override the instructions | Fixed, polite Spanish refusal; no model call when the rule matches, no approval prompt; logged as a security event (`security_refusal` in the pending log, `app.security_event` on the trace) |
 | `out_of_scope` | Unrelated to the team | Polite decline, no further model calls |
+| `capabilities` | Questions about the assistant itself ("¿qué podés hacer?", "¿cómo funcionás?", "¿quién sos?", "ayuda"), deterministic | Fixed Spanish description of what it can and cannot do plus the CLI commands; no RAG, no model call, never "No sé" |
 | `clarify` | Follow-up reference that cannot be resolved from the conversation (deterministic, before the LLM router) | Short clarification question; no model or tool call |
 
 The router is an LLM classifier with a deterministic safety net: `detectRefusal` sends secret / system-prompt / jailbreak requests to `refuse` before any model call, and `detectSensitive` forces irreversible actions to `sensitive` even if the model disagrees. Unparseable router output falls back to `question`, which can only answer from docs.
@@ -113,12 +114,13 @@ Threat model and residual risks: [`security.md`](security.md).
 - [x] Everything runs without credentials except the LLM calls (mock tools, local embeddings).
 - [x] Every request gets an instant acknowledgement (no model call); results, approval requests and failures arrive later as events tagged with the request number.
 - [x] CI runs typecheck and unit tests on every push and pull request (Node 22.12 and 24), without LLM calls, network-dependent tests or secrets.
+- [x] Questions about the assistant get a fixed capabilities description, never "No sé".
 - [x] Follow-ups resolve against the requester's recent tool results; unresolvable references get a clarification question, never a tool call with an invented id.
 - [x] Unit tests cover chunking, ranking, router parsing, safety net, pending store/summary, tools, graph flows and the assistant service (ack, queue limit, done / failed / approval flows) with a fake LLM or fake graph.
 
 ## Eval plan
 
-`evals/questions.json` holds 19 cases (answerable, must-say-"no sé", tasks, sensitive, out-of-scope, 3 adversarial prompt-injection cases and 2 multi-turn cases). A multi-turn case lists earlier user messages in `conversation` (run through the graph first; their turns become the history) or a fixed `history`; `mustNotCallTools` and `mustNotMention` check that a follow-up never invents an id. `npm run eval` runs them through the real graph (configured LLM — local OpenAI-compatible model by default or Claude — + local embeddings + mock tools, isolated pending log; escalations auto-rejected) and reports:
+`evals/questions.json` holds 20 cases (answerable, must-say-"no sé", tasks, sensitive, refusals, out-of-scope, 3 adversarial prompt-injection cases, 2 multi-turn cases and 1 capabilities question). A multi-turn case lists earlier user messages in `conversation` (run through the graph first; their turns become the history) or a fixed `history`; `mustNotCallTools` and `mustNotMention` check that a follow-up never invents an id. `npm run eval` runs them through the real graph (configured LLM — local OpenAI-compatible model by default or Claude — + local embeddings + mock tools, isolated pending log; escalations auto-rejected) and reports:
 
 - **Route accuracy** — router decision vs expected route.
 - **Fact hit rate** — expected key facts found in the reply body (sources excluded).

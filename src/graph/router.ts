@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { extractJson, type Llm } from "../llm.js";
 import { renderHistory } from "../memory/conversation-memory.js";
+import { isCapabilitiesQuestion } from "./capabilities.js";
 import { resolveReference } from "../memory/references.js";
 import { wrapUntrusted } from "../security/guards.js";
 import { ROUTES, type ConversationTurn, type State, type Update } from "./state.js";
@@ -130,6 +131,10 @@ export function makeRouterNode(llm: Llm) {
     // Secrets, the system prompt and jailbreaks: refused before any model call, no approval prompt.
     if (detectRefusal(state.question)) {
       return { route: "refuse", topic: "seguridad", routeReason: "regla de seguridad: secretos, instrucciones internas o intento de cambiar las reglas" };
+    }
+    // "¿Qué podés hacer?", "¿cómo funcionás?": a fixed description, no RAG and no model call.
+    if (isCapabilitiesQuestion(state.question)) {
+      return { route: "capabilities", topic: "ayuda", routeReason: "pregunta sobre el asistente" };
     }
     const history = state.history ?? [];
     // Follow-ups ("el primero que me pasaste") are resolved deterministically; never guessed.

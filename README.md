@@ -96,6 +96,7 @@ flowchart LR
     R -- refuse --> X[Rechazo fijo<br/>secretos / prompt / jailbreak]
     R -- out_of_scope --> O[Rechazo cortés]
     R -- "clarify (referencia ambigua)" --> C[Pregunta de aclaración]
+    R -- capabilities --> K[Descripción fija<br/>de capacidades]
     A -- "sin contexto → 'No sé'" --> P[(data/pending.json)]
     T -- sin herramienta adecuada --> P
     H -- aprobar / rechazar --> P
@@ -191,6 +192,10 @@ Un adaptador para Teams (o Slack) se conectaría así:
 Para producción, reemplazar la cola en proceso y `MemorySaver` por implementaciones persistentes (ver T3 en la lista de tareas) para que los trabajos sobrevivan a los reinicios.
 
 Comandos de la CLI: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/stats`, `/ayuda`, `/salir`. Los resultados se imprimen etiquetados con su número y el prompt se vuelve a dibujar, de modo que se puede seguir escribiendo mientras se procesan las preguntas anteriores. Con `/salir` o al terminar la entrada, la CLI espera a que finalicen los trabajos en curso; los trabajos que siguen esperando aprobación se informan y no se ejecuta nada.
+
+## Qué puede hacer el bot
+
+Las preguntas sobre el propio asistente ("¿qué podés hacer?", "¿cómo funcionás?", "¿quién sos?", "ayuda") reciben una descripción fija (ruta `capabilities`, sin RAG ni llamada al modelo): qué puede hacer (responder con la documentación indicando las fuentes, consultas de solo lectura de tickets y pipelines, derivar acciones al backup humano, registrar lo que no sabe), qué no puede hacer y los comandos de la CLI.
 
 ## Memoria de conversación
 

@@ -9,8 +9,11 @@ import type { ToolProvider } from "../tools/types.js";
  * `refuse` = secrets, the system prompt or attempts to override the instructions (refused directly).
  */
 export const ROUTES = ["question", "task", "sensitive", "refuse", "out_of_scope"] as const;
-/** Every graph route: the LLM routes plus deterministic ones (`clarify`: an unresolvable follow-up reference). */
-export const GRAPH_ROUTES = [...ROUTES, "clarify"] as const;
+/**
+ * Every graph route: the LLM routes plus deterministic ones (`clarify`: an unresolvable follow-up
+ * reference; `capabilities`: a question about the assistant itself).
+ */
+export const GRAPH_ROUTES = [...ROUTES, "clarify", "capabilities"] as const;
 export type Route = (typeof GRAPH_ROUTES)[number];
 
 export type Outcome = "answered" | "unknown" | "approved" | "rejected" | "out_of_scope" | "clarify" | "refused";

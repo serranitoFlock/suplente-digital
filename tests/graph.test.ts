@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ANSWER_PROMPT } from "../src/graph/answer.js";
+import { CAPABILITIES_MESSAGE } from "../src/graph/capabilities.js";
 import { DRAFT_PROMPT, REFUSAL_MESSAGE } from "../src/graph/escalate.js";
 import { askAgent, buildGraph, resumeAgent, type AgentGraph } from "../src/graph/graph.js";
 import { ROUTER_PROMPT } from "../src/graph/router.js";
@@ -199,6 +200,16 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
     expect(review).toBeUndefined();
     expect(state.outcome).toBe("refused");
     expect(calls).toEqual(["router"]);
+  });
+
+  it("describes its capabilities without RAG or model calls", async () => {
+    const graph = graphFor({ route: "question", answer: "NO_SE" });
+    const { state } = await askAgent(graph, "como funciona tu funcionamiento?", "c1");
+    expect(state.route).toBe("capabilities");
+    expect(state.outcome).toBe("answered");
+    expect(state.answer).toBe(CAPABILITIES_MESSAGE);
+    expect(calls).toEqual([]);
+    expect(await pending.list()).toEqual([]);
   });
 
   it("declines out-of-scope requests without extra model calls", async () => {
