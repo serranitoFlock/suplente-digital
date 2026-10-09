@@ -1,0 +1,33 @@
+{
+  "name": "suplente-digital",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Digital backup agent that covers routine questions and read-only tasks while a person or team is away.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "ingest": "tsx src/rag/ingest.ts",
+    "summary": "tsx src/pending/summary.ts",
+    "eval": "tsx evals/run.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.3.1",
+    "@langchain/anthropic": "1.5.12",
+    "@langchain/core": "1.2.17",
+    "@langchain/langgraph": "1.4.21",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "dotenv": "18.0.6",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}
