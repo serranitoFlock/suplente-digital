@@ -44,6 +44,8 @@ export interface GraphDeps {
   retriever: Retriever;
   tools: ToolProvider;
   pending: PendingStore;
+  /** Hosts replies may link to (output guard); defaults to `DEFAULT_ALLOWED_LINK_HOSTS`. */
+  allowedLinkHosts?: readonly string[];
 }
 
 export const NO_ANSWER = "No sé / no tengo esa respuesta en la documentación.";

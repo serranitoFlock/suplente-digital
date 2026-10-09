@@ -9,6 +9,7 @@ import { PendingStore } from "../src/pending/store.js";
 import { LocalE5Embedder } from "../src/rag/embeddings.js";
 import { Retriever } from "../src/rag/retriever.js";
 import { MockToolProvider } from "../src/tools/mock-provider.js";
+import { countFacts, injectionResisted } from "./scoring.js";
 
 interface EvalCase {
   id: string;
@@ -16,9 +17,9 @@ interface EvalCase {
   expectedRoute: Route;
   expectedFacts: string[];
   mustSayNoSe?: boolean;
+  /** Adversarial cases: strings that must never appear in the reply or draft (canary, exfil host, prompt fragments). */
+  mustNotContain?: string[];
 }
-
-const normalize = (text: string) => text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 async function main(): Promise<void> {
   // Throws a readable error (missing LLM_MODEL / ANTHROPIC_API_KEY) before any request is made.
@@ -38,6 +39,7 @@ async function main(): Promise<void> {
     retriever,
     tools: new MockToolProvider(),
     pending: new PendingStore(join(tmp, "pending.json")),
+    allowedLinkHosts: config.security.allowedLinkHosts,
   });
 
   const rows = [];
@@ -48,8 +50,7 @@ async function main(): Promise<void> {
       if (turn.review) turn = await resumeAgent(graph, { approved: false, note: "eval" }, `eval-${testCase.id}`);
 
       // Score only the reply body, not the appended source list (file names would inflate hits).
-      const answer = normalize((turn.state.answer ?? "").split("\n\nFuentes:")[0]!);
-      const hits = testCase.expectedFacts.filter((fact) => answer.includes(normalize(fact))).length;
+      const hits = countFacts((turn.state.answer ?? "").split("\n\nFuentes:")[0]!, testCase.expectedFacts);
       const saidNoSe = turn.state.outcome === "unknown";
       rows.push({
         id: testCase.id,
@@ -60,6 +61,7 @@ async function main(): Promise<void> {
         factRate: testCase.expectedFacts.length ? hits / testCase.expectedFacts.length : undefined,
         noSeOk: testCase.mustSayNoSe ? saidNoSe : testCase.expectedRoute === "question" ? !saidNoSe : undefined,
         escalated,
+        injectionOk: testCase.mustNotContain ? injectionResisted([turn.state.answer, turn.state.draft], testCase.mustNotContain) : undefined,
       });
     }
   } finally {
@@ -72,6 +74,7 @@ async function main(): Promise<void> {
   console.log(`Route accuracy:      ${pct(rows.map((r) => r.routeOk))}`);
   console.log(`Fact hit rate:       ${factRates.length ? `${Math.round((100 * factRates.reduce((a, b) => a + b, 0)) / factRates.length)}%` : "n/a"}`);
   console.log(`Correct "no sé":     ${pct(rows.flatMap((r) => (r.noSeOk === undefined ? [] : [r.noSeOk])))}`);
+  console.log(`Injection resisted:  ${pct(rows.flatMap((r) => (r.injectionOk === undefined ? [] : [r.injectionOk])))}`);
 }
 
 main().catch((error: unknown) => {

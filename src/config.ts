@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { resolve } from "node:path";
 import { resolveLlmSettings, type LlmSettings } from "./llm.js";
+import { resolveAllowedLinkHosts } from "./security/guards.js";
 import { resolveConcurrency } from "./service/assistant-service.js";
 
 const root = process.cwd();
@@ -13,6 +14,8 @@ export const config = {
   embeddingModel: env("EMBEDDING_MODEL") ?? "Xenova/multilingual-e5-small",
   transformersCacheDir: resolve(root, env("TRANSFORMERS_CACHE_DIR") ?? ".cache/transformers"),
   retrieval: { topK: 4, minScore: 0.82 },
+  /** Output guard: replies may only link to these hosts and their subdomains (`ALLOWED_LINK_HOSTS`, comma-separated). */
+  security: { allowedLinkHosts: resolveAllowedLinkHosts(process.env.ALLOWED_LINK_HOSTS) },
   /** Background graph runs at once (`ASSISTANT_CONCURRENCY`, default 1). */
   assistant: { concurrency: resolveConcurrency(process.env.ASSISTANT_CONCURRENCY) },
   mcp: {

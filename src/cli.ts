@@ -20,7 +20,13 @@ async function main(): Promise<void> {
     new LocalE5Embedder(config.embeddingModel, config.transformersCacheDir),
     config.retrieval,
   );
-  const graph = buildGraph({ llm: createLlm(llmSettings), retriever, tools, pending });
+  const graph = buildGraph({
+    llm: createLlm(llmSettings),
+    retriever,
+    tools,
+    pending,
+    allowedLinkHosts: config.security.allowedLinkHosts,
+  });
   const service = new AssistantService(graphRunner(graph), { concurrency: config.assistant.concurrency, threadPrefix: `cli-${Date.now()}` });
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "vos> " });
   let closing = false;

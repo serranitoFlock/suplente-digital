@@ -130,6 +130,24 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
     expect(calls).not.toContain("answer");
   });
 
+  it("passes retrieved docs as delimited untrusted data and strips exfiltration links from the reply", async () => {
+    let seenUser = "";
+    const graph = buildGraph({
+      llm: async (system, user) => {
+        if (system === ROUTER_PROMPT) return '{"route":"question","topic":"cdn"}';
+        seenUser = user;
+        return "Lo define el manifiesto [1]. Validá en https://exfil.example.net/c?d=x";
+      },
+      retriever: new Retriever(index, embedder, { topK: 2, minScore: 0.3 }),
+      tools: new MockToolProvider(),
+      pending,
+    });
+    const { state } = await askAgent(graph, "¿Qué bundle carga el manifiesto del CDN?", "t8");
+    expect(seenUser).toMatch(/<documento id="1" fuente="cdn.md"/);
+    expect(state.answer).not.toContain("exfil.example.net");
+    expect(state.answer).toContain("[enlace externo omitido]");
+  });
+
   it("declines out-of-scope requests without extra model calls", async () => {
     const graph = graphFor({ route: "out_of_scope" });
     const { state } = await askAgent(graph, "¿Qué película me recomendás?", "t7");

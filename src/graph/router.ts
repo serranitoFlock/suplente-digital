@@ -31,8 +31,15 @@ const ACTION_PATTERNS = [
   /\b(merge[aá](lo|me)?|mergear|hac[eé] (el )?merge)(?!\p{L})/iu,
   /\b(revoc|otorg|aprob)(á|ar|a|ame|alo|ale)(?!\p{L}).*\b(acceso|permiso|mr|merge|release)/iu,
   /\bforce[- ]?push/iu,
+  // Ticket mutations: the catalog has no write tools, so a request to change a ticket goes to a human.
+  /(?<!\p{L})(cerr(á|ar|alo|ala)|reasign\p{L}*|asign(á|ar|ame|amelo|alo|ala)|transicion(á|ar|alo))(?!\p{L}).*\b(ticket|[A-Z][A-Z0-9]+-\d+)/iu,
 ];
-const SECRET_PATTERNS = [/\b(token|contraseñ|password|credencial|secret)\p{L}*/iu];
+const SECRET_PATTERNS = [
+  /\b(token|contraseñ|password|credencial|secret)\p{L}*/iu,
+  // Prompt-leak / jailbreak attempts against the bot itself (OWASP LLM01 / LLM07).
+  /\b(system prompt|prompt (de|del) sistema)\b/iu,
+  /\b(ignor|olvid)\p{L}*\s+(todas\s+)?(tus|las)\s+instrucciones/iu,
+];
 
 /** "¿Cómo…?", "¿Cuáles son los pasos para…?", "¿Qué tengo que hacer para…?" and similar procedure questions. */
 const HOW_TO_FRAMING =

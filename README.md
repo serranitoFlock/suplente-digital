@@ -59,7 +59,7 @@ Other scripts:
 | Script | What it does |
 |--------|--------------|
 | `npm run summary` | Welcome-back report from `data/pending.json` |
-| `npm run eval` | Runs `evals/questions.json` through the graph and prints route accuracy, fact hit rate and correct "no sé" |
+| `npm run eval` | Runs `evals/questions.json` through the graph and prints route accuracy, fact hit rate, correct "no sé" and injection resisted |
 | `npm test` | Unit tests (no network: fake LLM and fake embeddings) |
 | `npm run typecheck` | `tsc --noEmit` |
 
@@ -142,7 +142,11 @@ To use Claude instead: `LLM_PROVIDER=anthropic` plus `ANTHROPIC_API_KEY` (option
 
 ## Safety notes
 
-- The bot has **no write tools**. Sensitive or irreversible requests produce a draft and pause for a human; even approved drafts are executed by people, not by the bot.
+Full threat model (lethal trifecta, OWASP LLM01/02/06, residual risks): [`docs/security.md`](docs/security.md).
+
+- The bot has **no write tools**; the read-only allowlist (`TOOL_POLICIES`) is enforced by every provider, and the MCP provider refuses unlisted or destructive tools.
+- Retrieved docs and tool results are wrapped in delimiters and treated as untrusted data; an output guard strips links to non-allowlisted hosts (`ALLOWED_LINK_HOSTS`) and redacts token formats. `knowledge/faq-registry-npm.md` is a deliberate prompt-injection test fixture.
+- The bot never executes actions itself. Sensitive or irreversible requests produce a draft and pause for a human; even approved drafts are executed by people, not by the bot.
 - Requests to merge, deploy to production, delete or change permissions are escalated by a deterministic rule, regardless of the model's routing; *how-to* questions about those procedures ("¿Cómo despliego a producción?") are answered from the docs instead. Anything about secrets is always escalated.
 - Answers come only from retrieved docs, with citations; otherwise the bot says "No sé" and logs the question.
 - `data/` (index and pending log) and `.env` are gitignored.

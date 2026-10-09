@@ -16,7 +16,8 @@ export function chunkMarkdown(source: string, markdown: string, maxChars = 900):
   let current: { heading: string; lines: string[] } = { heading: "", lines: [] };
   sections.push(current);
 
-  for (const line of markdown.split(/\r?\n/)) {
+  // HTML comments are invisible when the doc is rendered; dropping them keeps hidden text out of the index.
+  for (const line of stripHtmlComments(markdown).split(/\r?\n/)) {
     const match = HEADING.exec(line);
     if (!match) {
       current.lines.push(line);
@@ -36,6 +37,10 @@ export function chunkMarkdown(source: string, markdown: string, maxChars = 900):
     }
   }
   return chunks;
+}
+
+export function stripHtmlComments(markdown: string): string {
+  return markdown.replace(/<!--[\s\S]*?(-->|$)/g, "");
 }
 
 function splitByParagraph(text: string, maxChars: number): string[] {
