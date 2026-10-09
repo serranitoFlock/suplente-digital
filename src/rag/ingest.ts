@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { config } from "../config.js";
-import { chunkMarkdown } from "./chunk.js";
+import { chunkMarkdown, stripHtmlComments, type Chunk } from "./chunk.js";
 import { LocalE5Embedder, type Embedder } from "./embeddings.js";
 import type { VectorIndex } from "./retriever.js";
 
@@ -16,10 +16,33 @@ export async function loadKnowledge(dir: string): Promise<SourceDoc[]> {
   return Promise.all(files.map(async (source) => ({ source, markdown: await readFile(join(dir, source), "utf8") })));
 }
 
+/** Document title: the first H1 (HTML comments ignored); empty when the doc has none. */
+export function documentTitle(markdown: string): string {
+  const h1 = stripHtmlComments(markdown)
+    .split(/\r?\n/)
+    .find((line) => /^#\s+/.test(line));
+  return h1?.replace(/^#\s+/, "").trim() ?? "";
+}
+
+/**
+ * Text embedded for a chunk: a short "contextual" header (document title, then the heading path)
+ * before the chunk text, so a section like "Pasos" still says which document it belongs to.
+ * A cheap, LLM-free take on Anthropic's Contextual Retrieval
+ * (https://www.anthropic.com/news/contextual-retrieval). Measured with `npm run eval:retrieval`:
+ * recall@k and MRR unchanged vs. heading + text, slightly lower scores for unanswerable questions;
+ * adding the document's intro paragraph made recall@4 worse, so it is not included.
+ */
+export function contextualPassage(chunk: Chunk, title: string): string {
+  return [`Documento: ${title || chunk.source}`, chunk.heading && `Sección: ${chunk.heading}`, chunk.text].filter(Boolean).join("\n");
+}
+
 export async function buildIndexFromDocs(docs: SourceDoc[], embedder: Embedder): Promise<VectorIndex> {
-  const chunks = docs.flatMap((doc) => chunkMarkdown(doc.source, doc.markdown));
-  // Embed heading + text so section titles contribute to retrieval.
-  const vectors = await embedder.embedPassages(chunks.map((c) => `${c.heading}\n${c.text}`));
+  const prepared = docs.flatMap((doc) => {
+    const title = documentTitle(doc.markdown);
+    return chunkMarkdown(doc.source, doc.markdown).map((chunk) => ({ chunk, passage: contextualPassage(chunk, title) }));
+  });
+  const chunks = prepared.map((p) => p.chunk);
+  const vectors = await embedder.embedPassages(prepared.map((p) => p.passage));
   return {
     model: embedder.model,
     createdAt: new Date().toISOString(),

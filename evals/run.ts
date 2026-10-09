@@ -9,6 +9,7 @@ import { computeStats, formatUsd } from "../src/observability/stats.js";
 import { JsonlTraceExporter, Tracer, type TraceSummary } from "../src/observability/tracing.js";
 import { PendingStore } from "../src/pending/store.js";
 import { LocalE5Embedder } from "../src/rag/embeddings.js";
+import { mean, recallAtK, reciprocalRank } from "../src/rag/metrics.js";
 import { Retriever } from "../src/rag/retriever.js";
 import { MockToolProvider } from "../src/tools/mock-provider.js";
 import { countFacts, injectionResisted, mergeSummaries } from "./scoring.js";
@@ -21,20 +22,59 @@ interface EvalCase {
   mustSayNoSe?: boolean;
   /** Adversarial cases: strings that must never appear in the reply or draft (canary, exfil host, prompt fragments). */
   mustNotContain?: string[];
+  /** Knowledge files that should be retrieved for this question (retrieval metrics). */
+  expectedSources?: string[];
+}
+
+const pctOf = (value: number | undefined) => (value === undefined ? "n/a" : `${Math.round(100 * value)}%`);
+
+/**
+ * Retriever-only pass, before any generation: recall@k and MRR over the cases with `expectedSources`.
+ * Ranks the whole index (no `minScore` cut-off) so the metric isolates ranking quality.
+ */
+async function evaluateRetrieval(cases: EvalCase[], embedder: LocalE5Embedder): Promise<void> {
+  const k = config.retrieval.topK;
+  const ranker = await Retriever.load(config.indexPath, embedder, { topK: Number.MAX_SAFE_INTEGER, minScore: -1 });
+  const rows = [];
+  for (const testCase of cases) {
+    if (!testCase.expectedSources?.length) continue;
+    const ranked = (await ranker.retrieve(testCase.question)).map((chunk) => chunk.source);
+    rows.push({
+      id: testCase.id,
+      expected: testCase.expectedSources.join(", "),
+      top1: ranked[0],
+      "recall@1": recallAtK(ranked, testCase.expectedSources, 1),
+      [`recall@${k}`]: recallAtK(ranked, testCase.expectedSources, k),
+      rr: Number(reciprocalRank(ranked, testCase.expectedSources).toFixed(3)),
+    });
+  }
+  console.table(rows);
+  console.log(`Retrieval recall@1:  ${pctOf(mean(rows.map((r) => r["recall@1"])))}`);
+  console.log(`Retrieval recall@${k}:  ${pctOf(mean(rows.map((r) => r[`recall@${k}`] as number)))}`);
+  console.log(`Retrieval MRR:       ${mean(rows.map((r) => r.rr))?.toFixed(3) ?? "n/a"} (${rows.length} cases with expectedSources)`);
+
+  // Guard rail for the "no sé" behavior: unanswerable questions should stay below the score cut-off.
+  const { minScore } = config.retrieval;
+  const unknown = [];
+  for (const testCase of cases.filter((c) => c.mustSayNoSe)) {
+    const [best] = await ranker.retrieve(testCase.question);
+    unknown.push({ id: testCase.id, topScore: Number((best?.score ?? 0).toFixed(3)), aboveMinScore: (best?.score ?? 0) >= minScore });
+  }
+  console.log(`Unanswerable cases above minScore ${minScore}: ${unknown.filter((u) => u.aboveMinScore).length}/${unknown.length} (${unknown.map((u) => `${u.id} ${u.topScore}`).join(", ")})`);
 }
 
 async function main(): Promise<void> {
+  const retrievalOnly = process.argv.includes("--retrieval-only");
+  const cases = JSON.parse(await readFile(new URL("./questions.json", import.meta.url), "utf8")) as EvalCase[];
+  const embedder = new LocalE5Embedder(config.embeddingModel, config.transformersCacheDir);
+  await evaluateRetrieval(cases, embedder);
+  if (retrievalOnly) return;
+
   // Throws a readable error (missing LLM_MODEL / ANTHROPIC_API_KEY) before any request is made.
   const llmSettings = loadLlmSettings();
-  console.log(`Eval model: ${describeLlm(llmSettings)}`);
-
-  const cases = JSON.parse(await readFile(new URL("./questions.json", import.meta.url), "utf8")) as EvalCase[];
+  console.log(`\nEval model: ${describeLlm(llmSettings)}`);
   const tmp = await mkdtemp(join(tmpdir(), "suplente-eval-"));
-  const retriever = await Retriever.load(
-    config.indexPath,
-    new LocalE5Embedder(config.embeddingModel, config.transformersCacheDir),
-    config.retrieval,
-  );
+  const retriever = await Retriever.load(config.indexPath, embedder, config.retrieval);
   // Mock tools and an isolated pending log keep eval runs reproducible and side-effect free.
   const graph = buildGraph({
     llm: createLlm(llmSettings),

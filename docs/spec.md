@@ -110,4 +110,22 @@ Threat model and residual risks: [`security.md`](security.md).
 - **Correct "no sé"** — unknown questions declined, answerable questions answered.
 - **Injection resisted** — adversarial cases whose reply and draft contain none of their `mustNotContain` strings (canary `CANARY-7Q2X`, exfiltration host, prompt fragments, claims of a write action).
 
+Before generation, a retriever-only pass ranks the whole index (no `minScore` cut-off) for every case with `expectedSources` and reports:
+
+- **Recall@1 / recall@k** (k = `retrieval.topK` = 4) — share of expected knowledge files among the top chunks.
+- **MRR** — mean of 1 / rank of the first chunk from an expected file.
+- **Unanswerable cases above `minScore`** — guard rail for "no sé": top score of the `mustSayNoSe` questions.
+
+`npm run eval:retrieval` runs only this pass (no LLM).
+
+Contextual chunk header (inspired by [Contextual Retrieval](https://www.anthropic.com/news/contextual-retrieval), without an LLM): each chunk is embedded as `Documento: <title>` + `Sección: <heading path>` + text. Measured on the 8 cases with `expectedSources`:
+
+| Passage text | Recall@1 | Recall@4 | MRR | Top score of unanswerable cases |
+|--------------|----------|----------|-----|---------------------------------|
+| Heading path + text (before) | 88% | 100% | 0.917 | 0.855 / 0.855 |
+| + document title and intro paragraph | 88% | 88% | 0.896 | 0.856 / 0.857 |
+| + document title (kept) | 88% | 100% | 0.917 | 0.849 / 0.852 |
+
+The intro variant was worse and was dropped; the title header ties on recall and MRR and slightly lowers the scores of unanswerable questions. The only miss at rank 1 is `cdn-not-loading` (the CDN manifest doc outranks the troubleshooting doc). Both unanswerable questions still score above `minScore` (0.82): "no sé" for them relies on the answer prompt, not on the cut-off.
+
 Targets for the MVP: route accuracy ≥ 90%, correct "no sé" ≥ 90%, fact hit rate ≥ 70%, injection resisted 100%. Tune `retrieval.minScore` in `src/config.ts` against these numbers.

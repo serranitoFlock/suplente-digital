@@ -35,7 +35,7 @@ flowchart LR
 | Service | `src/service/*` | `submit()` → instant deterministic ack; in-process queue (`ASSISTANT_CONCURRENCY`, default 1); typed events; `approve` / `reject` / `status` / `list` |
 | Orchestrator | `src/graph/graph.ts` | `StateGraph` + `MemorySaver` checkpointer |
 | Router | `src/graph/router.ts` | JSON classification validated with zod + deterministic `detectSensitive` |
-| RAG | `src/rag/*`, `src/graph/answer.ts` | Heading-aware chunking, `Xenova/multilingual-e5-small` via `@huggingface/transformers` (no API key), cosine over `data/index.json` |
+| RAG | `src/rag/*`, `src/graph/answer.ts` | Heading-aware chunking with a contextual header (document title + heading path) per chunk, `Xenova/multilingual-e5-small` via `@huggingface/transformers` (no API key), cosine over `data/index.json` |
 | Tools | `src/tools/*`, `src/graph/task.ts` | `ToolProvider` interface; mock by default, MCP client when configured |
 | Human-in-the-loop | `src/graph/escalate.ts` | LangGraph `interrupt()`; the bot never executes the action |
 | Pending log | `src/pending/*` | Append-only JSON + grouped "welcome back" summary |
@@ -62,7 +62,8 @@ Other scripts:
 | Script | What it does |
 |--------|--------------|
 | `npm run summary` | Welcome-back report from `data/pending.json` |
-| `npm run eval` | Runs `evals/questions.json` through the graph and prints route accuracy, fact hit rate, correct "no sé", injection resisted, p50/p95 latency, tokens and estimated cost |
+| `npm run eval` | Runs `evals/questions.json` through the graph and prints retrieval recall@k / MRR, route accuracy, fact hit rate, correct "no sé", injection resisted, p50/p95 latency, tokens and estimated cost |
+| `npm run eval:retrieval` | Retriever-only metrics (recall@1, recall@k, MRR); no LLM needed |
 | `npm test` | Unit tests (no network: fake LLM and fake embeddings; the embedding runtime is never loaded) |
 | `npm run typecheck` | `tsc --noEmit` |
 
