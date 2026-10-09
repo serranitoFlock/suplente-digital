@@ -25,13 +25,16 @@ export const config = {
   /**
    * Answer context (see `selectContext`): candidates above `minScore`, then up to `docSlots` chunks
    * from `knowledge/*.md` (`RETRIEVAL_DOC_SLOTS`, default 4) and up to `engramSlots` Engram chunks
-   * (`RETRIEVAL_ENGRAM_SLOTS`, default 2), curated docs first.
+   * (`RETRIEVAL_ENGRAM_SLOTS`, default 2), curated docs first; the best curated doc brings its other
+   * sections (small-to-big) within `maxContextChars`.
    */
   retrieval: {
     minScore: 0.82,
     candidates: DEFAULT_CONTEXT.candidates,
     docSlots: resolveSlotCount("RETRIEVAL_DOC_SLOTS", process.env.RETRIEVAL_DOC_SLOTS, DEFAULT_CONTEXT.docSlots),
     engramSlots: resolveSlotCount("RETRIEVAL_ENGRAM_SLOTS", process.env.RETRIEVAL_ENGRAM_SLOTS, DEFAULT_CONTEXT.engramSlots),
+    expandSiblings: true,
+    maxContextChars: DEFAULT_CONTEXT.maxContextChars,
   },
   /**
    * Engram notes as a second knowledge source (see README, "Conocimiento desde Engram"):

@@ -18,9 +18,13 @@ export interface ContextOptions {
   docSlots?: number;
   /** Maximum chunks from Engram notes (default 2). They also get the doc slots when no curated chunk passes `minScore`. */
   engramSlots?: number;
+  /** Small-to-big: fill doc slots with the other sections of the best curated doc (default true). */
+  expandSiblings?: boolean;
+  /** Sections added by the expansion never push the context past this many characters (default 6000, ~1.5k tokens). */
+  maxContextChars?: number;
 }
 
-export const DEFAULT_CONTEXT = { candidates: 20, docSlots: 4, engramSlots: 2 } as const;
+export const DEFAULT_CONTEXT = { candidates: 20, docSlots: 4, engramSlots: 2, maxContextChars: 6000 } as const;
 
 /** Engram notes are indexed under `engram:#<id> › <project> › <title>`; everything else is a curated doc. */
 export function isEngramSource(source: string): boolean {
@@ -38,6 +42,12 @@ export function chunkPosition(chunk: Pick<Chunk, "id">): number {
  * up to `docSlots` curated chunks, then up to `engramSlots` Engram chunks, each group best first.
  * Unused slots of one source are not given to the other, except that Engram may fill the doc slots
  * when no curated chunk passes `minScore` (an Engram-only answer still gets a full context).
+ *
+ * Sibling expansion (small-to-big): the best curated doc also brings its other sections, even below
+ * `minScore`, best first, and they are shown in document order. A short how-to split by headings
+ * (e.g. a troubleshooting checklist) then reaches the model whole instead of as one isolated step.
+ * One doc slot stays for the best chunk of the next curated doc when there is one, so a question
+ * whose answer sits in the second-ranked doc keeps it. Engram notes are never expanded.
  */
 export function selectContext(ranked: ScoredChunk[], options: ContextOptions): ScoredChunk[] {
   const { minScore, candidates = DEFAULT_CONTEXT.candidates, docSlots = DEFAULT_CONTEXT.docSlots, engramSlots = DEFAULT_CONTEXT.engramSlots } = options;
@@ -45,7 +55,30 @@ export function selectContext(ranked: ScoredChunk[], options: ContextOptions): S
   const curated = pool.filter((chunk) => !isEngramSource(chunk.source));
   const engram = pool.filter((chunk) => isEngramSource(chunk.source));
   if (curated.length === 0) return engram.slice(0, docSlots + engramSlots);
-  return [...curated.slice(0, docSlots), ...engram.slice(0, engramSlots)];
+  const notes = engram.slice(0, engramSlots);
+  const docs = options.expandSiblings === false ? curated.slice(0, docSlots) : expandBestDoc(ranked, pool, curated, notes, { ...options, docSlots });
+  return [...docs, ...notes];
+}
+
+function expandBestDoc(ranked: ScoredChunk[], pool: ScoredChunk[], curated: ScoredChunk[], notes: ScoredChunk[], options: ContextOptions & { docSlots: number }): ScoredChunk[] {
+  const { docSlots, maxContextChars = DEFAULT_CONTEXT.maxContextChars } = options;
+  if (docSlots === 0) return [];
+  const best = curated[0]!.source;
+  const others = curated.filter((chunk) => chunk.source !== best);
+  const ownSlots = others.length > 0 ? Math.max(docSlots - 1, 1) : docSlots;
+  const inPool = new Set(pool.map((chunk) => chunk.id));
+  const length = (chunks: ScoredChunk[]) => chunks.reduce((total, chunk) => total + chunk.text.length, 0);
+
+  const own = curated.filter((chunk) => chunk.source === best).slice(0, ownSlots);
+  let chars = length(notes) + length(own) + length(others.slice(0, 1));
+  for (const sibling of ranked) {
+    if (own.length >= ownSlots) break;
+    if (sibling.source !== best || inPool.has(sibling.id) || chars + sibling.text.length > maxContextChars) continue;
+    own.push(sibling);
+    chars += sibling.text.length;
+  }
+  own.sort((a, b) => chunkPosition(a) - chunkPosition(b));
+  return [...own, ...others.slice(0, docSlots - own.length)];
 }
 
 /** Non-negative integer from an environment variable (`RETRIEVAL_DOC_SLOTS`, `RETRIEVAL_ENGRAM_SLOTS`). */

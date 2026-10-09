@@ -83,3 +83,35 @@ describe("resolveSlotCount", () => {
     for (const raw of ["-1", "1.5", "abc"]) expect(() => resolveSlotCount("RETRIEVAL_DOC_SLOTS", raw, 4)).toThrow(/RETRIEVAL_DOC_SLOTS/);
   });
 });
+
+describe("selectContext — sibling expansion (small-to-big)", () => {
+  // a.md has five sections; only #2 passes minScore. b.md is the next curated doc.
+  const aDoc = [doc("a.md", 2, 0.95), doc("a.md", 0, 0.5), doc("a.md", 1, 0.4), doc("a.md", 3, 0.3), doc("a.md", 4, 0.2)];
+
+  it("adds the best curated doc's other sections in document order, keeping one slot for the next curated doc", () => {
+    const ranked = byScore([...aDoc, doc("b.md", 0, 0.9), note(1, 0.93)]);
+    expect(ids(selectContext(ranked, base))).toEqual(["a.md#0", "a.md#1", "a.md#2", "b.md#0", note(1, 0).id]);
+  });
+
+  it("lets the best doc take every doc slot when no other curated doc passes", () => {
+    const ranked = byScore([...aDoc, note(1, 0.93)]);
+    expect(ids(selectContext(ranked, base))).toEqual(["a.md#0", "a.md#1", "a.md#2", "a.md#3", note(1, 0).id]);
+  });
+
+  it("fills the remaining doc slots with other candidates when the best doc is short", () => {
+    const ranked = byScore([doc("a.md", 1, 0.95), doc("a.md", 0, 0.3), doc("b.md", 0, 0.9), doc("c.md", 0, 0.85), doc("d.md", 0, 0.84)]);
+    expect(ids(selectContext(ranked, base))).toEqual(["a.md#0", "a.md#1", "b.md#0", "c.md#0"]);
+  });
+
+  it("stops adding sections before the context exceeds maxContextChars", () => {
+    const ranked = byScore([...aDoc, note(1, 0.93)]);
+    // a.md#2 + note = 200 chars; one 100-char sibling fits in 300, the next does not.
+    expect(ids(selectContext(ranked, { ...base, maxContextChars: 300 }))).toEqual(["a.md#0", "a.md#2", note(1, 0).id]);
+  });
+
+  it("never expands Engram notes and can be turned off", () => {
+    const multiChunkNote = [{ ...note(1, 0.95), id: "engram:#1#0" }, { ...note(1, 0.3), id: "engram:#1#1" }];
+    expect(ids(selectContext(byScore(multiChunkNote), base))).toEqual(["engram:#1#0"]);
+    expect(ids(selectContext(byScore(aDoc), { ...base, expandSiblings: false }))).toEqual(["a.md#2"]);
+  });
+});
