@@ -6,6 +6,7 @@ import { sourceLabel } from "../graph/citations.js";
 import type { ConversationTurn, ReviewDecision, Route } from "../graph/state.js";
 import { InMemoryConversationMemory, toConversationTurn, type ConversationMemory } from "../memory/conversation-memory.js";
 import { summarizeToolResult, type ConversationLogSink, type LogOutcome, type NewLogEntry } from "../logging/conversation-log.js";
+import { InMemoryJobStore, type JobPatch, type JobRecord, type JobStore } from "../persistence/job-store.js";
 import { formatAnswerForUser } from "../presentation/format-answer.js";
 import { JobQueue } from "./job-queue.js";
 
@@ -79,11 +80,32 @@ export interface AssistantEvents {
 
 export type DecisionResult = "accepted" | "not_found" | "not_pending";
 
+/** What `recover()` found and scheduled, by job id (ascending). */
+export interface RecoveryReport {
+  /** Still waiting for approval; approve/reject them as usual. */
+  pending: number[];
+  /** Queued asks, scheduled again in id order (per-requester order preserved). */
+  requeued: number[];
+  /** Asks interrupted mid-run, re-run from scratch on a fresh thread (tools are read-only). */
+  rerun: number[];
+  /** Decided (decision saved) but unfinished: resumed once with the saved decision. */
+  resumed: number[];
+}
+
 export interface AssistantServiceOptions {
   /** Max graph runs at once (default 1: local models usually serve one request at a time). */
   concurrency?: number;
-  /** Prefix for LangGraph thread ids, so several services can share one checkpointer. */
+  /**
+   * Prefix for LangGraph thread ids (`<prefix>-<id>`, `<prefix>-<id>-a<attempt>` for re-runs). Default: `job` with a
+   * `jobs` store (ids are unique per database, so thread ids are stable across restarts); `job-<timestamp>` without
+   * one, so several in-memory services can share one checkpointer.
+   */
   threadPrefix?: string;
+  /**
+   * Where jobs live (default: in memory). With a persistent store (`SqliteJobStore` on the checkpointer's database),
+   * call `recover()` once at startup so work interrupted by a restart continues.
+   */
+  jobs?: JobStore;
   /** Short-term memory per requester (default: in memory, last 6 turns). */
   memory?: ConversationMemory;
   /** Show `[n]` markers and the cited sources to the requester (`SHOW_CITATIONS`, default false). */
@@ -122,13 +144,7 @@ function failureMessage(id: number): string {
   return `No pude procesar la consulta #${id} por un problema técnico. Probá de nuevo en unos minutos o escribile al backup humano.`;
 }
 
-interface Job extends JobView {
-  threadId: string;
-  /** Memory and ordering key; absent for anonymous requests (no memory, no ordering). */
-  conversationId?: string;
-  /** Set when the human backup decides; the resumed step logs it as a `decision` line. */
-  decision?: ReviewDecision;
-}
+type Job = JobRecord;
 
 export class AssistantService extends EventEmitter<AssistantEvents> {
   readonly #runner: AgentRunner;
@@ -137,18 +153,19 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
   readonly #memory: ConversationMemory;
   readonly #showCitations: boolean;
   readonly #log: ConversationLogSink | undefined;
-  readonly #jobs = new Map<number, Job>();
+  readonly #jobs: JobStore;
   /** Last scheduled step per conversation: requests from the same requester run in order. */
   readonly #tails = new Map<string, Promise<void>>();
   #inFlight = 0;
   readonly #idleWaiters: (() => void)[] = [];
-  #lastId = 0;
+  #recovered = false;
 
   constructor(runner: AgentRunner, options: AssistantServiceOptions = {}) {
     super();
     this.#runner = runner;
     this.#queue = new JobQueue(options.concurrency ?? 1);
-    this.#threadPrefix = options.threadPrefix ?? `job-${Date.now()}`;
+    this.#jobs = options.jobs ?? new InMemoryJobStore();
+    this.#threadPrefix = options.threadPrefix ?? (options.jobs ? "job" : `job-${Date.now()}`);
     this.#memory = options.memory ?? new InMemoryConversationMemory();
     this.#showCitations = options.showCitations ?? false;
     this.#log = options.log;
@@ -156,25 +173,25 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
 
   /** Accepts a request and returns its acknowledgement immediately; the work runs in the background. */
   submit(text: string, { requester }: { requester?: string } = {}): { id: number; ack: string } {
-    const id = ++this.#lastId;
     const now = new Date().toISOString();
-    const job: Job = {
+    // The job is committed before it is scheduled, so a restart finds it.
+    const job = this.#jobs.create((id) => ({
       id,
       question: text,
       requester,
       status: "queued",
       createdAt: now,
       updatedAt: now,
-      threadId: `${this.#threadPrefix}-${id}`,
+      threadId: this.#threadId(id, 1),
       conversationId: requester,
-    };
-    this.#jobs.set(id, job);
+      attempt: 1,
+    }));
+    const { id } = job;
 
     const saturated = this.#queue.active >= this.#queue.concurrency;
     const behindOwnRequest = job.conversationId !== undefined && this.#tails.has(job.conversationId);
-    const ahead = saturated || behindOwnRequest ? this.list().filter((j) => j.id !== id && (j.status === "queued" || j.status === "running")).length : 0;
-    // History is read when the job starts, after earlier jobs of the same requester completed.
-    this.#schedule(job, async () => this.#runner.ask(text, job.threadId, await this.#history(job)), { ordered: true });
+    const ahead = saturated || behindOwnRequest ? this.#jobs.unfinished().filter((j) => j.id !== id).length : 0;
+    this.#scheduleAsk(job);
     return { id, ack: buildAck(id, text, ahead) };
   }
 
@@ -193,7 +210,40 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
   }
 
   list(): JobView[] {
-    return [...this.#jobs.values()].map(toView);
+    return this.#jobs.list().map(toView);
+  }
+
+  /**
+   * Continues the work a previous process left unfinished in the job store. Call it once at startup, after the
+   * event listeners are attached and before `submit()`; only one process should own a database's queue.
+   * `needs_approval` jobs wait as before; a job with a saved decision is resumed once with it; an interrupted ask
+   * is re-run on a fresh thread; queued asks are scheduled again in id order. Outcomes arrive as the usual events.
+   */
+  recover(): RecoveryReport {
+    if (this.#recovered) throw new Error("AssistantService.recover() can only run once.");
+    this.#recovered = true;
+    const report: RecoveryReport = { pending: [], requeued: [], rerun: [], resumed: [] };
+    report.pending = this.#jobs
+      .list()
+      .filter((job) => job.status === "needs_approval")
+      .map((job) => job.id);
+    for (const job of this.#jobs.unfinished()) {
+      if (job.decision) {
+        this.#scheduleResume(job);
+        report.resumed.push(job.id);
+      } else if (job.status === "running") {
+        const attempt = job.attempt + 1;
+        // The old thread may hold a half-written checkpoint; start over on a new one.
+        const fresh = this.#jobs.transition(job.id, "running", { status: "queued", attempt, threadId: this.#threadId(job.id, attempt), updatedAt: new Date().toISOString() });
+        if (!fresh) continue;
+        this.#scheduleAsk(fresh);
+        report.rerun.push(job.id);
+      } else {
+        this.#scheduleAsk(job);
+        report.requeued.push(job.id);
+      }
+    }
+    return report;
   }
 
   /** Resolves when no job is queued or running (jobs waiting for approval do not count). */
@@ -203,21 +253,33 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
   }
 
   #decide(id: number, decision: ReviewDecision): DecisionResult {
-    const job = this.#jobs.get(id);
-    if (!job) return "not_found";
-    if (job.status !== "needs_approval") return "not_pending";
-    // Flip the status synchronously so a second approve/reject cannot resume (and log) twice.
-    this.#update(job, { status: "queued" });
-    job.decision = decision;
-    this.#schedule(job, () => this.#runner.resume(decision, job.threadId));
+    // Atomic check-and-set committed before the resume is scheduled: a second approve/reject (in this or another
+    // process) finds the job no longer pending, and a crash after this line resumes it once on recovery.
+    const job = this.#jobs.transition(id, "needs_approval", { status: "queued", decision, updatedAt: new Date().toISOString() });
+    if (!job) return this.#jobs.get(id) ? "not_pending" : "not_found";
+    this.#scheduleResume(job);
     return "accepted";
+  }
+
+  #threadId(id: number, attempt: number): string {
+    return attempt === 1 ? `${this.#threadPrefix}-${id}` : `${this.#threadPrefix}-${id}-a${attempt}`;
+  }
+
+  #scheduleAsk(job: Job): void {
+    // History is read when the job starts, after earlier jobs of the same requester completed.
+    this.#schedule(job, async () => this.#runner.ask(job.question, job.threadId, await this.#history(job)), { ordered: true });
+  }
+
+  #scheduleResume(job: Job): void {
+    const decision = job.decision!;
+    this.#schedule(job, () => this.#runner.resume(decision, job.threadId));
   }
 
   #schedule(job: Job, step: () => Promise<AgentTurn>, { ordered = false } = {}): void {
     this.#inFlight++;
     const key = ordered ? job.conversationId : undefined;
     const previous = key === undefined ? undefined : this.#tails.get(key);
-    const enqueue = () => this.#queue.run(() => this.#process(job, step));
+    const enqueue = () => this.#queue.run(() => this.#process(job.id, step));
     // Enqueue synchronously when nothing of the same requester is pending, so queue stats stay exact.
     const run: Promise<void> = (previous ? previous.then(enqueue) : enqueue())
       .catch((error: unknown) => {
@@ -241,15 +303,16 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
     }
   }
 
-  async #process(job: Job, step: () => Promise<AgentTurn>): Promise<void> {
-    this.#update(job, { status: "running" });
+  /** Each status change is committed before the side effect it announces (log line, memory, event). */
+  async #process(id: number, step: () => Promise<AgentTurn>): Promise<void> {
+    let job = this.#update(id, { status: "running" });
     const startedAt = Date.now();
     let turn: AgentTurn;
     try {
       turn = await step();
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      this.#update(job, { status: "failed", error: detail });
+      job = this.#update(id, { status: "failed", error: detail });
       await this.#writeLog(job, { outcome: "failed", latencyMs: Date.now() - startedAt, error: detail });
       this.emit("failed", { ...eventBase(job), message: failureMessage(job.id), error: detail });
       return;
@@ -257,7 +320,7 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
     const latencyMs = Date.now() - startedAt;
 
     if (turn.review) {
-      this.#update(job, { status: "needs_approval", route: turn.state.route, draft: turn.review.draft });
+      job = this.#update(id, { status: "needs_approval", route: turn.state.route, draft: turn.review.draft });
       await this.#writeLog(job, { ...turnLogFields(turn), outcome: "approval_pending", draft: turn.review.draft, latencyMs });
       this.emit("needs_approval", { ...eventBase(job), draft: turn.review.draft });
       return;
@@ -266,7 +329,7 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
     const answer = formatAnswerForUser(rawAnswer, { showCitations: this.#showCitations });
     await this.#remember(job, turn);
     await this.#writeLog(job, { ...turnLogFields(turn), outcome: logOutcome(turn), answer: rawAnswer, latencyMs });
-    this.#update(job, { status: "done", route: turn.state.route, answer });
+    job = this.#update(id, { status: "done", route: turn.state.route, answer });
     this.emit("done", { ...eventBase(job), route: turn.state.route, answer, rawAnswer });
   }
 
@@ -300,8 +363,10 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
     }
   }
 
-  #update(job: Job, patch: Partial<JobView>): void {
-    Object.assign(job, patch, { updatedAt: new Date().toISOString() });
+  /** Persists a patch and returns the job as stored. */
+  #update(id: number, patch: JobPatch): Job {
+    this.#jobs.update(id, { ...patch, updatedAt: new Date().toISOString() });
+    return this.#jobs.get(id)!;
   }
 }
 
@@ -340,6 +405,6 @@ function eventBase({ id, question, requester }: Job): JobEventBase {
   return { id, question, requester };
 }
 
-function toView({ threadId: _threadId, conversationId: _conversationId, decision: _decision, ...view }: Job): JobView {
+function toView({ threadId: _threadId, conversationId: _conversationId, decision: _decision, attempt: _attempt, ...view }: Job): JobView {
   return { ...view };
 }
