@@ -1,5 +1,6 @@
 import { Command, END, isGraphInterrupt, MemorySaver, START, StateGraph, type BaseCheckpointSaver } from "@langchain/langgraph";
 import { withSpan, type Tracer } from "../observability/tracing.js";
+import { countRedactedFields } from "../security/injection-patterns.js";
 import type { ToolProvider } from "../tools/types.js";
 import { makeAnswerNode } from "./answer.js";
 import { capabilitiesNode } from "./capabilities.js";
@@ -117,10 +118,13 @@ export async function tracedTurn(
   };
   const { result, trace } = await tracer.trace("invoke_agent suplente-digital", attributes, async (root) => {
     const turn = await run();
+    // Tool-result fields replaced by the injection marker (see `neutralizeInstructions` in the task node).
+    const redacted = countRedactedFields(turn.state.toolCalls);
     root.setAttributes({
       "app.route": turn.state.route ?? "unknown",
       "app.outcome": turn.review ? "needs_approval" : (turn.state.outcome ?? "unknown"),
       ...(turn.state.route === "refuse" ? { "app.security_event": "refusal" } : {}),
+      ...(redacted > 0 ? { "app.security_event": "tool_injection_redacted", "app.tool.redacted_fields": redacted } : {}),
     });
     return turn;
   });

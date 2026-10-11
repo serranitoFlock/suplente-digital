@@ -1,6 +1,7 @@
 import { renderHistory } from "../memory/conversation-memory.js";
 import { CLARIFY_NO_CONTEXT } from "../memory/references.js";
 import { sanitizeOutput, wrapUntrusted } from "../security/guards.js";
+import { neutralizeInstructions } from "../security/injection-patterns.js";
 import {
   isAutoRunnable,
   parseToolCall,
@@ -70,7 +71,12 @@ function selectionInput(question: string, history: ConversationTurn[]): string {
 }
 
 export function makeTaskNode({ llm, tools, pending, allowedLinkHosts }: Pick<GraphDeps, "llm" | "tools" | "pending" | "allowedLinkHosts">) {
-  const summarize = async (question: string, toolLabel: string, payload: string, footer: string, records: ToolCallRecord[]): Promise<Update> => {
+  /**
+   * `payload` must already be neutralized (see `neutralizeInstructions`): the summary model only
+   * ever sees tool data with planted instructions replaced by a fixed marker.
+   */
+  const summarize = async (question: string, toolLabel: string, payload: string, footer: string, records: ToolCallRecord[], redacted: number): Promise<Update> => {
+    if (redacted > 0) console.warn(`[security] neutralized ${redacted} suspicious field(s) in the result of ${toolLabel.split(" ")[0]}`);
     const summary = await llm(TOOL_SUMMARY_PROMPT, `Pedido: ${question}\nHerramienta: ${toolLabel}\n${wrapUntrusted("resultado_herramienta", payload, { herramienta: toolLabel })}`);
     return {
       outcome: "answered",
@@ -93,13 +99,16 @@ export function makeTaskNode({ llm, tools, pending, allowedLinkHosts }: Pick<Gra
       await pending.append({ question: state.question, topic: state.topic, reason: "tool_failure" });
       return { outcome: "unknown", toolCalls: [], answer: call.tool === SCRIPT_TOOL ? SCRIPT_FAILURE_MESSAGE : TOOL_FAILURE_MESSAGE };
     }
+    // The record (state, conversation memory and the daily log) keeps the NEUTRALIZED result, not the raw one:
+    // memory is fed back to the model in follow-ups, so a planted instruction must not survive there either.
+    const { text: safeResult, redacted } = neutralizeInstructions(result);
     // For run_script, `args` is `{ script, args }`: the record, memory and logs keep the script id and its values.
-    const record: ToolCallRecord = { tool: call.tool, args: call.args, readOnly: true, result: parseToolResult(result) };
+    const record: ToolCallRecord = { tool: call.tool, args: call.args, readOnly: true, result: parseToolResult(safeResult) };
     const footer =
       call.tool === SCRIPT_TOOL
         ? `(Consulta de solo lectura: script ${call.args.script} del registro de scripts)`
         : `(Consulta de solo lectura: ${call.tool} vía ${tools.name})`;
-    return summarize(question, `${call.tool} ${JSON.stringify(call.args)}`, result, footer, [...extraRecords, record]);
+    return summarize(question, `${call.tool} ${JSON.stringify(call.args)}`, safeResult, footer, [...extraRecords, record], redacted);
   };
 
   /** A follow-up that points at an earlier result: refresh tickets by key; reuse other items as they are. */
@@ -107,13 +116,16 @@ export function makeTaskNode({ llm, tools, pending, allowedLinkHosts }: Pick<Gra
     const question = `${state.question}\n(Se refiere a: ${item.label})`;
     const key = item.kind === "ticket" ? toolArgSchemas.get_ticket.safeParse({ key: item.data.key }) : undefined;
     if (key?.success) return runTool(state, question, { tool: "get_ticket", args: key.data });
-    const record: ToolCallRecord = { tool: item.tool, args: {}, readOnly: true, result: [item.data], fromMemory: true };
+    // Remembered data was neutralized when it was stored; check again in case it came from elsewhere (e.g. older memory).
+    const { text: payload, redacted } = neutralizeInstructions(JSON.stringify(item.data));
+    const record: ToolCallRecord = { tool: item.tool, args: {}, readOnly: true, result: [parseToolResult(payload)], fromMemory: true };
     return summarize(
       question,
       `${item.tool} (resultado anterior)`,
-      JSON.stringify(item.data),
+      payload,
       `(Basado en el resultado anterior de ${item.tool}; sin una nueva consulta)`,
       [record],
+      redacted,
     );
   };
 

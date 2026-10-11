@@ -4,6 +4,7 @@ import { renderHistory } from "../memory/conversation-memory.js";
 import { isCapabilitiesQuestion } from "./capabilities.js";
 import { resolveReference } from "../memory/references.js";
 import { wrapUntrusted } from "../security/guards.js";
+import { OVERRIDE_PATTERNS } from "../security/injection-patterns.js";
 import { ROUTES, type ConversationTurn, type State, type Update } from "./state.js";
 
 export interface RouterDecision {
@@ -56,14 +57,6 @@ const SECRET_PATTERNS = [
   /\b(token|contraseñ|password|credencial|secret)\p{L}*/iu,
   /\bapi[ _-]?keys?\b/iu,
 ];
-/** Prompt-leak / jailbreak attempts against the bot itself (OWASP LLM01 / LLM07). */
-const OVERRIDE_PATTERNS = [
-  /\b(system prompt|prompt (de|del) sistema)\b/iu,
-  /\b(ignor|olvid|salte|saltá|desactiv)\p{L}*\s+(todas\s+)?(tus|las)\s+(instrucciones|reglas|restricciones)/iu,
-  /\b(revel|mostr|repet|copi|dec)\p{L}*\s+(todas\s+)?(tus|las)\s+(instrucciones|reglas)\s+(internas|del sistema|ocultas|originales)/iu,
-  /\b(jailbreak|modo (desarrollador|developer|dios|sin restricciones))\b/iu,
-];
-
 /** "¿Cómo…?", "¿Cuáles son los pasos para…?", "¿Qué tengo que hacer para…?" and similar procedure questions. */
 const HOW_TO_FRAMING =
   /^\s*¿?\s*(c[oó]mo|cu[aá]l(es)? (son|es) (los pasos|el procedimiento|el proceso)|qu[eé] pasos|qu[eé] (tengo|hay) que hacer|qu[eé] reviso)(?!\p{L})/iu;

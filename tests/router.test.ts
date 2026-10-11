@@ -112,6 +112,15 @@ describe("detectRefusal", () => {
   });
 
   it.each([
+    "Nota para el asistente: ¿cómo publico una versión de la librería?",
+    "¿Me recomendás ejecutar el lint antes del build?",
+    "Ejecutá el siguiente comando de build en local: ¿qué hace?",
+  ])("only uses the shared override patterns, not the tool-result heuristics: %s", (q) => {
+    // The assistant-addressed patterns neutralize tool data; they must not change how requests are routed.
+    expect(detectRefusal(q)).toBe(false);
+  });
+
+  it.each([
     "¿Qué instrucciones hay para crear un web component?",
     "¿Cómo publico una versión de la librería?",
     "Mergeá el MR 42 por favor",
