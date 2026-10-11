@@ -29,6 +29,11 @@ export const routes: Routes = [
         title: 'Sin responder · Suplente digital',
         loadComponent: () => import('./features/unanswered/unanswered').then((m) => m.Unanswered),
       },
+      {
+        path: 'configuracion',
+        title: 'Configuración · Suplente digital',
+        loadComponent: () => import('./features/settings/settings').then((m) => m.Settings),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

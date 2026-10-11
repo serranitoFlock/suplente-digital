@@ -46,3 +46,36 @@ export function decisionErrorMessage(error: unknown): string {
       return unexpected(error);
   }
 }
+
+/** The `issues` of a 422 `validation_failed` body (dotted paths), or undefined for any other error. */
+export function validationIssues(error: unknown): { path: string; message: string }[] | undefined {
+  if (!(error instanceof HttpErrorResponse) || error.status !== 422) return undefined;
+  const issues = (error.error as { error?: { issues?: unknown } } | null)?.error?.issues;
+  if (!Array.isArray(issues))
+    return [{ path: '', message: apiMessage(error) ?? 'Datos inválidos' }];
+  return issues.flatMap((issue: unknown) => {
+    const { path, message } = (issue ?? {}) as { path?: unknown; message?: unknown };
+    return typeof message === 'string'
+      ? [{ path: typeof path === 'string' ? path : '', message }]
+      : [];
+  });
+}
+
+/** User-facing text for a failed configuration request (401 already ends the session in the interceptor). */
+export function configErrorMessage(error: unknown): string {
+  if (!(error instanceof HttpErrorResponse)) return unexpected(error);
+  switch (error.status) {
+    case 0:
+      return 'No se pudo conectar con la API';
+    case 401:
+      return 'La sesión expiró';
+    case 404:
+      return 'Este servidor no tiene configuración en tiempo de ejecución';
+    case 413:
+      return 'El contenido es demasiado grande';
+    case 422:
+      return `No se guardó: ${apiMessage(error) ?? 'hay datos inválidos'}`;
+    default:
+      return unexpected(error);
+  }
+}

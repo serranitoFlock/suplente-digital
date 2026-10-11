@@ -41,6 +41,19 @@ El token queda solo en `sessionStorage` de esa pestaña: se borra al cerrarla o 
 - **Historial** (`/historial`): todos los pedidos (`GET /v1/jobs`) en una tabla, del más nuevo al más viejo, con filtros por estado, por solicitante (los que aparecen en la lista) y por texto libre sobre la pregunta y la respuesta (sin distinguir mayúsculas ni tildes), orden por fecha y paginado. Filtrar, ordenar y paginar se hace en el navegador sobre la lista completa. Al hacer clic en una fila (o en el número del pedido, accesible con teclado) se abre el detalle: solicitante, estado, ruta, fechas, pregunta, respuesta, borrador y error, siempre como texto. En vivo: cada evento `done` / `failed` / `needs_approval` relee el pedido con `GET /v1/jobs/:id` y actualiza (o agrega) su fila.
 - **Sin responder** (`/sin-responder`): la vista de "bienvenido de vuelta" a partir de `GET /v1/pending/summary`. Agrupa los pendientes por tema, destaca las preguntas que el bot no supo responder (la documentación no lo cubre o es una tarea no soportada) y los docs sugeridos para escribir (`knowledge/<tema>.md`), y después muestra las escalaciones (aprobada / rechazada, con la nota), las fallas de herramientas y los rechazos de seguridad. No se actualiza en vivo: usar "Actualizar".
 
+## Qué agrega C2: Configuración
+
+**Configuración** (`/configuracion`) cambia los ajustes de tiempo de ejecución del servidor sin tocar el `.env` (ver [Runtime configuration](../docs/spec.md#runtime-configuration)). Cada campo muestra su valor efectivo y de dónde sale: **Panel** (guardado desde acá), **.env** o **Por defecto**. Los valores del panel tienen "Restablecer", que borra el valor del panel y vuelve al del `.env` o al por defecto.
+
+- **Modelo**: proveedor, URL base, modelo (con la lista del servidor local cuando la API puede leerla; si no, se escribe a mano), temperatura (0 a 2), "Sin razonamiento" y modelo de Anthropic. Muestra el modelo actual. "Probar conexión" prueba el modelo con los cambios todavía sin guardar y muestra la latencia o el error.
+- **Clave de API de Anthropic**: solo se ve si está configurada y desde cuándo. Se carga o reemplaza en un campo de contraseña que nunca viene precargado y se vacía después de guardar; la API no la devuelve nunca. "Borrar" pide confirmación.
+- **Respuestas**: turnos de memoria (0 a 50) y mostrar citas.
+- **Herramientas MCP**: comando, argumentos (uno por línea), tiempo máximo por llamada y el mapeo de herramientas (JSON). Estos cambios **requieren reiniciar el servidor**; las claves guardadas que todavía no están en uso se avisan arriba de la página.
+- **Scripts de consulta**: los scripts registrados, los rechazados con su motivo y el registro (JSON). Solo se aceptan scripts de solo lectura: un script que escribe se rechaza por diseño y el error aparece junto al registro, con el id del script.
+- **Historial de cambios**: clave, valor anterior → nuevo y fecha (las claves secretas aparecen como `***`).
+
+Cada sección se guarda por separado y envía solo los campos que cambiaron (`PUT /v1/config`). Un campo de texto vacío no se envía: para volver al valor del `.env` se usa "Restablecer". El JSON se revisa en el navegador antes de enviarlo, pero la validación que vale es la del servidor: si responde 422, cada error aparece junto a su campo y no se guarda nada. Después de guardar, un aviso dice qué se aplicó y qué requiere reiniciar, y la página se actualiza con la configuración que devuelve la API.
+
 ## Comandos
 
 | Comando | Qué hace |
@@ -56,7 +69,7 @@ Los tests no usan la API real: las llamadas HTTP se simulan con `HttpTestingCont
 
 | Ruta | Qué hay |
 |------|---------|
-| `src/app/core/api/` | Tipos de la API, clientes (`JobsApi`, `PendingApi`), mensajes de error |
+| `src/app/core/api/` | Tipos de la API, clientes (`JobsApi`, `PendingApi`, `ConfigApi`), mensajes de error |
 | `src/app/core/auth/` | `AuthService` (token en `sessionStorage`), interceptor, guards |
 | `src/app/core/events/` | Parser SSE (función pura) y `AdminEvents` (fetch + reconexión) |
 | `src/app/layout/` | Barra superior, navegación, estado de la conexión |
@@ -64,6 +77,7 @@ Los tests no usan la API real: las llamadas HTTP se simulan con `HttpTestingCont
 | `src/app/features/approvals/` | Cola de aprobaciones y diálogo de decisión |
 | `src/app/features/history/` | Historial: filtros como funciones puras, tabla, diálogo de detalle |
 | `src/app/features/unanswered/` | Sin responder: pendientes agrupados por tema |
+| `src/app/features/settings/` | Configuración: armado del cambio y errores como funciones puras, página y diálogo de confirmación |
 
 ## Pendiente
 

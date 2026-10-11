@@ -1,0 +1,545 @@
+<header class="settings__header">
+  <h1 class="settings__title">Configuración</h1>
+  <button mat-stroked-button type="button" (click)="reload()" [disabled]="resource.isLoading()">
+    <mat-icon aria-hidden="true">refresh</mat-icon>
+    Actualizar
+  </button>
+</header>
+
+<!-- Source badge, "Restablecer" (panel values only) and the errors of one field. -->
+<ng-template #meta let-section="section" let-name="name" let-label="label">
+  @let view = field(section, name);
+  @if (view) {
+    <div class="meta" [id]="section + '-' + name + '-meta'">
+      <span class="badge" [class]="'badge--' + view.source">
+        <span class="sr-only">Origen: </span>{{ sourceLabel(view.source) }}
+      </span>
+      @if (view.source === 'panel') {
+        @if (view.updatedAt) {
+          <span class="meta__date">
+            desde
+            <time [attr.datetime]="view.updatedAt">{{
+              view.updatedAt | date: 'dd/MM/yyyy HH:mm'
+            }}</time>
+          </span>
+        }
+        <button
+          mat-button
+          type="button"
+          class="meta__reset"
+          [disabled]="busy() !== null"
+          [attr.aria-label]="'Restablecer ' + label"
+          (click)="reset(section, name)"
+        >
+          Restablecer
+        </button>
+      }
+    </div>
+  }
+  @for (message of errorsFor(section + '.' + name); track $index) {
+    <p class="field-error" role="alert">{{ message }}</p>
+  }
+</ng-template>
+
+<ng-template #sectionAlerts let-section="section">
+  @for (message of sectionErrors(section); track $index) {
+    <p class="field-error field-error--section" role="alert">{{ message }}</p>
+  }
+</ng-template>
+
+@if (resource.isLoading()) {
+  <mat-progress-bar mode="indeterminate" aria-label="Cargando la configuración" />
+}
+
+@if (resource.error() && !config()) {
+  <div class="settings__message settings__message--error" role="alert">
+    <p>No se pudo cargar la configuración.</p>
+    <button mat-button type="button" (click)="reload()">Reintentar</button>
+  </div>
+} @else if (config(); as view) {
+  @for (message of sectionErrors('general'); track $index) {
+    <p class="field-error field-error--section" role="alert">{{ message }}</p>
+  }
+
+  @if (pendingRestart().length > 0) {
+    <div class="banner banner--restart" role="status">
+      <mat-icon aria-hidden="true">restart_alt</mat-icon>
+      <p>
+        Hay cambios guardados que requieren reiniciar el servidor:
+        <span class="settings__keys">{{ pendingRestart().join(', ') }}</span>
+      </p>
+    </div>
+  }
+
+  <!-- 1. Model -->
+  <mat-card appearance="outlined" class="section" aria-labelledby="llm-title">
+    <mat-card-header>
+      <mat-card-title><h2 id="llm-title" class="section__title">Modelo</h2></mat-card-title>
+      <mat-card-subtitle>
+        Modelo actual: <span class="settings__description">{{ view.llm.description }}</span>
+      </mat-card-subtitle>
+    </mat-card-header>
+    <mat-card-content>
+      <ng-container
+        [ngTemplateOutlet]="sectionAlerts"
+        [ngTemplateOutletContext]="{ section: 'llm' }"
+      />
+      <form class="section__form" novalidate (submit)="$event.preventDefault(); save('llm')">
+        <div class="field">
+          <mat-form-field appearance="outline">
+            <mat-label>Proveedor</mat-label>
+            <mat-select [formField]="llmForm.provider">
+              <mat-option value="openai-compatible">Compatible con OpenAI (local)</mat-option>
+              <mat-option value="anthropic">Anthropic</mat-option>
+            </mat-select>
+          </mat-form-field>
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{ section: 'llm', name: 'provider', label: 'Proveedor' }"
+          />
+        </div>
+        <div class="field">
+          <mat-form-field appearance="outline">
+            <mat-label>URL base</mat-label>
+            <input matInput type="url" [formField]="llmForm.baseUrl" />
+          </mat-form-field>
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{ section: 'llm', name: 'baseUrl', label: 'URL base' }"
+          />
+        </div>
+        <div class="field">
+          <mat-form-field appearance="outline">
+            <mat-label>Modelo</mat-label>
+            <input matInput [formField]="llmForm.model" [matAutocomplete]="modelList" />
+            <mat-autocomplete #modelList="matAutocomplete">
+              @for (name of modelOptions(); track name) {
+                <mat-option [value]="name">{{ name }}</mat-option>
+              }
+            </mat-autocomplete>
+            <mat-hint>
+              @if (models.hasValue() && models.value().models.length > 0) {
+                Elija uno de los {{ models.value().models.length }} modelos del servidor o escriba
+                otro
+              } @else if (models.hasValue() && models.value().reason) {
+                {{ models.value().reason }}
+              } @else {
+                Escriba el nombre del modelo
+              }
+            </mat-hint>
+          </mat-form-field>
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{ section: 'llm', name: 'model', label: 'Modelo' }"
+          />
+        </div>
+        <div class="field">
+          <div class="field__row">
+            <mat-slider min="0" max="2" step="0.1" discrete class="field__slider">
+              <input matSliderThumb aria-label="Temperatura" [formField]="llmForm.temperature" />
+            </mat-slider>
+            <mat-form-field appearance="outline" class="field__number">
+              <mat-label>Temperatura</mat-label>
+              <input matInput type="number" step="0.1" [formField]="llmForm.temperature" />
+            </mat-form-field>
+          </div>
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{
+              section: 'llm',
+              name: 'temperature',
+              label: 'Temperatura',
+            }"
+          />
+        </div>
+        <div class="field">
+          <mat-slide-toggle [formField]="llmForm.disableThinking"
+            >Sin razonamiento</mat-slide-toggle
+          >
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{
+              section: 'llm',
+              name: 'disableThinking',
+              label: 'Sin razonamiento',
+            }"
+          />
+        </div>
+        <div class="field">
+          <mat-form-field appearance="outline">
+            <mat-label>Modelo de Anthropic</mat-label>
+            <input matInput [formField]="llmForm.anthropicModel" />
+          </mat-form-field>
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{
+              section: 'llm',
+              name: 'anthropicModel',
+              label: 'Modelo de Anthropic',
+            }"
+          />
+        </div>
+        <div class="section__actions">
+          <button mat-flat-button type="submit" [disabled]="busy() !== null">Guardar modelo</button>
+          <button
+            mat-stroked-button
+            type="button"
+            [disabled]="busy() !== null"
+            (click)="testConnection()"
+          >
+            Probar conexión
+          </button>
+        </div>
+      </form>
+
+      <div class="test-result" aria-live="polite">
+        @if (busy() === 'test') {
+          <p>Probando la conexión…</p>
+        } @else if (testResult(); as result) {
+          @if (result.ok) {
+            <p class="test-result--ok">
+              Conexión correcta con <span class="settings__keys">{{ result.model }}</span> ({{
+                result.latencyMs
+              }}
+              ms)
+            </p>
+          } @else {
+            <p class="test-result--error">
+              Falló la conexión con <span class="settings__keys">{{ result.model }}</span> ({{
+                result.latencyMs
+              }}
+              ms): <span class="test-result__detail">{{ result.error }}</span>
+            </p>
+          }
+        } @else if (testError()) {
+          <p class="test-result--error">{{ testError() }}</p>
+        }
+      </div>
+
+      <section class="secret" aria-labelledby="secret-title">
+        <h3 id="secret-title" class="secret__title">Clave de API de Anthropic</h3>
+        @let secret = view.settings.llm.anthropicApiKey;
+        <p class="secret__state" role="status">
+          @if (secret.set) {
+            Configurada
+          } @else {
+            No configurada
+          }
+          <span class="badge" [class]="'badge--' + secret.source">
+            <span class="sr-only">Origen: </span>{{ sourceLabel(secret.source) }}
+          </span>
+          @if (secret.updatedAt) {
+            <span class="meta__date">
+              actualizada el
+              <time [attr.datetime]="secret.updatedAt">{{
+                secret.updatedAt | date: 'dd/MM/yyyy HH:mm'
+              }}</time>
+            </span>
+          }
+        </p>
+        <form class="secret__form" novalidate (submit)="saveSecret($event)">
+          <mat-form-field appearance="outline" class="secret__field">
+            <mat-label>{{ secret.set ? 'Nueva clave' : 'Clave' }}</mat-label>
+            <input
+              matInput
+              type="password"
+              autocomplete="new-password"
+              spellcheck="false"
+              [formField]="secretForm.key"
+            />
+            <mat-hint>No se muestra nunca: el servidor no la devuelve.</mat-hint>
+          </mat-form-field>
+          <div class="section__actions">
+            <button mat-flat-button type="submit" [disabled]="busy() !== null">
+              {{ secret.set ? 'Reemplazar' : 'Cargar' }}
+            </button>
+            @if (secret.source === 'panel') {
+              <button
+                mat-stroked-button
+                type="button"
+                [disabled]="busy() !== null"
+                (click)="deleteSecret()"
+              >
+                Borrar
+              </button>
+            }
+          </div>
+        </form>
+        @for (message of errorsFor('llm.anthropicApiKey'); track $index) {
+          <p class="field-error" role="alert">{{ message }}</p>
+        }
+      </section>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- 2. Answers -->
+  <mat-card appearance="outlined" class="section" aria-labelledby="assistant-title">
+    <mat-card-header>
+      <mat-card-title>
+        <h2 id="assistant-title" class="section__title">Respuestas</h2>
+      </mat-card-title>
+    </mat-card-header>
+    <mat-card-content>
+      <ng-container
+        [ngTemplateOutlet]="sectionAlerts"
+        [ngTemplateOutletContext]="{ section: 'assistant' }"
+      />
+      <form class="section__form" novalidate (submit)="$event.preventDefault(); save('assistant')">
+        <div class="field">
+          <mat-form-field appearance="outline" class="field__number">
+            <mat-label>Turnos de memoria</mat-label>
+            <input matInput type="number" step="1" [formField]="assistantForm.memoryTurns" />
+            <mat-hint>De 0 a 50 (0 desactiva la memoria)</mat-hint>
+          </mat-form-field>
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{
+              section: 'assistant',
+              name: 'memoryTurns',
+              label: 'Turnos de memoria',
+            }"
+          />
+        </div>
+        <div class="field">
+          <mat-slide-toggle [formField]="assistantForm.showCitations"
+            >Mostrar citas</mat-slide-toggle
+          >
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{
+              section: 'assistant',
+              name: 'showCitations',
+              label: 'Mostrar citas',
+            }"
+          />
+        </div>
+        <div class="section__actions">
+          <button mat-flat-button type="submit" [disabled]="busy() !== null">
+            Guardar respuestas
+          </button>
+        </div>
+      </form>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- 3. MCP tools (restart only) -->
+  <mat-card appearance="outlined" class="section" aria-labelledby="mcp-title">
+    <mat-card-header>
+      <mat-card-title
+        ><h2 id="mcp-title" class="section__title">Herramientas MCP</h2></mat-card-title
+      >
+    </mat-card-header>
+    <mat-card-content>
+      <div class="banner banner--restart mcp-banner">
+        <mat-icon aria-hidden="true">restart_alt</mat-icon>
+        <p>
+          <strong>Requiere reiniciar el servidor.</strong> Estos campos se guardan, pero se usan
+          recién cuando el servidor se reinicia.
+        </p>
+      </div>
+      <ng-container
+        [ngTemplateOutlet]="sectionAlerts"
+        [ngTemplateOutletContext]="{ section: 'mcp' }"
+      />
+      <form class="section__form" novalidate (submit)="$event.preventDefault(); save('mcp')">
+        <div class="field">
+          <mat-form-field appearance="outline">
+            <mat-label>Comando del servidor MCP</mat-label>
+            <input matInput spellcheck="false" [formField]="mcpForm.serverCommand" />
+          </mat-form-field>
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{
+              section: 'mcp',
+              name: 'serverCommand',
+              label: 'Comando del servidor MCP',
+            }"
+          />
+        </div>
+        <div class="field">
+          <mat-form-field appearance="outline">
+            <mat-label>Argumentos</mat-label>
+            <textarea
+              matInput
+              rows="3"
+              class="mono"
+              spellcheck="false"
+              [formField]="mcpForm.serverArgs"
+            ></textarea>
+            <mat-hint>Uno por línea</mat-hint>
+          </mat-form-field>
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{ section: 'mcp', name: 'serverArgs', label: 'Argumentos' }"
+          />
+        </div>
+        <div class="field">
+          <mat-form-field appearance="outline" class="field__number">
+            <mat-label>Tiempo máximo por llamada (ms)</mat-label>
+            <input matInput type="number" step="100" [formField]="mcpForm.callTimeoutMs" />
+          </mat-form-field>
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{
+              section: 'mcp',
+              name: 'callTimeoutMs',
+              label: 'Tiempo máximo por llamada',
+            }"
+          />
+        </div>
+        <div class="field">
+          <mat-form-field appearance="outline">
+            <mat-label>Mapeo de herramientas (JSON)</mat-label>
+            <textarea
+              matInput
+              rows="10"
+              class="mono"
+              spellcheck="false"
+              [formField]="mcpForm.toolsMapping"
+            ></textarea>
+            <mat-hint>El mismo documento que config/mcp-tools.*.json</mat-hint>
+          </mat-form-field>
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{
+              section: 'mcp',
+              name: 'toolsMapping',
+              label: 'Mapeo de herramientas',
+            }"
+          />
+        </div>
+        <div class="section__actions">
+          <button mat-flat-button type="submit" [disabled]="busy() !== null">
+            Guardar herramientas
+          </button>
+        </div>
+      </form>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- 4. Query scripts -->
+  <mat-card appearance="outlined" class="section" aria-labelledby="scripts-title">
+    <mat-card-header>
+      <mat-card-title>
+        <h2 id="scripts-title" class="section__title">Scripts de consulta</h2>
+      </mat-card-title>
+    </mat-card-header>
+    <mat-card-content>
+      <div class="banner banner--info">
+        <mat-icon aria-hidden="true">lock</mat-icon>
+        <p>
+          Solo se aceptan scripts de <strong>solo lectura</strong> (<code>readOnly: true</code>). Un
+          script que escribe o modifica algo se rechaza por diseño y el registro no se guarda.
+        </p>
+      </div>
+      <h3 class="section__subtitle">Registrados ({{ view.scripts.registered.length }})</h3>
+      @if (view.scripts.registered.length === 0) {
+        <p class="settings__muted">No hay scripts registrados</p>
+      } @else {
+        <ul class="scripts__list">
+          @for (id of view.scripts.registered; track id) {
+            <li>
+              <code>{{ id }}</code>
+            </li>
+          }
+        </ul>
+      }
+      @if (view.scripts.rejected.length > 0) {
+        <h3 class="section__subtitle">Rechazados ({{ view.scripts.rejected.length }})</h3>
+        <ul class="scripts__list scripts__rejected">
+          @for (item of view.scripts.rejected; track item.id) {
+            <li>
+              <code>{{ item.id }}</code> — <span>{{ item.reason }}</span>
+            </li>
+          }
+        </ul>
+      }
+      <ng-container
+        [ngTemplateOutlet]="sectionAlerts"
+        [ngTemplateOutletContext]="{ section: 'scripts' }"
+      />
+      <form class="section__form" novalidate (submit)="$event.preventDefault(); save('scripts')">
+        <div class="field">
+          <mat-form-field appearance="outline">
+            <mat-label>Registro de scripts (JSON)</mat-label>
+            <textarea
+              matInput
+              rows="12"
+              class="mono"
+              spellcheck="false"
+              [formField]="scriptsForm.registry"
+            ></textarea>
+            <mat-hint>El mismo documento que config/scripts.*.json</mat-hint>
+          </mat-form-field>
+          <ng-container
+            [ngTemplateOutlet]="meta"
+            [ngTemplateOutletContext]="{
+              section: 'scripts',
+              name: 'registry',
+              label: 'Registro de scripts',
+            }"
+          />
+        </div>
+        <div class="section__actions">
+          <button mat-flat-button type="submit" [disabled]="busy() !== null">
+            Guardar scripts
+          </button>
+        </div>
+      </form>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- 5. Change history -->
+  <mat-card appearance="outlined" class="section" aria-labelledby="audit-title">
+    <mat-card-header>
+      <mat-card-title>
+        <h2 id="audit-title" class="section__title">Historial de cambios</h2>
+      </mat-card-title>
+    </mat-card-header>
+    <mat-card-content>
+      @if (audit.error()) {
+        <p class="settings__message--error" role="alert">
+          No se pudo cargar el historial de cambios.
+        </p>
+      } @else if (audit.hasValue()) {
+        @if (audit.value().entries.length === 0) {
+          <p class="settings__muted">Todavía no hubo cambios desde el panel</p>
+        } @else {
+          <div class="audit__wrap">
+            <table class="audit">
+              <caption class="sr-only">
+                Cambios de configuración, del más reciente al más antiguo
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Clave</th>
+                  <th scope="col">Cambio</th>
+                  <th scope="col">Fecha</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (entry of audit.value().entries; track entry.id) {
+                  <tr>
+                    <td>
+                      <code>{{ entry.key }}</code>
+                    </td>
+                    <td class="audit__change">
+                      <span class="audit__value">{{ displayValue(entry.oldValue) }}</span>
+                      <span aria-hidden="true"> → </span><span class="sr-only"> a </span>
+                      <span class="audit__value">{{ displayValue(entry.newValue) }}</span>
+                    </td>
+                    <td>
+                      <time [attr.datetime]="entry.changedAt">{{
+                        entry.changedAt | date: 'dd/MM/yyyy HH:mm'
+                      }}</time>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      }
+    </mat-card-content>
+  </mat-card>
+}
