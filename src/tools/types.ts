@@ -49,6 +49,28 @@ export class ToolNotAllowedError extends Error {
   }
 }
 
+/**
+ * Why a read-only tool call could not be completed: the remote tool is not exposed (`missing_tool`),
+ * the call took longer than the timeout (`timeout`), the server crashed or the connection closed
+ * (`unavailable`), or the server answered with an MCP error result (`remote_error`).
+ */
+export type ToolFailureKind = "missing_tool" | "timeout" | "unavailable" | "remote_error";
+
+/**
+ * A tool call that failed for operational reasons (never a policy refusal: that stays `ToolNotAllowedError`).
+ * The message is internal and never includes remote payloads; replies to requesters use fixed text.
+ */
+export class ToolCallError extends Error {
+  constructor(
+    readonly tool: ToolName,
+    readonly kind: ToolFailureKind,
+    message = `Tool "${tool}" failed (${kind}).`,
+  ) {
+    super(message);
+    this.name = "ToolCallError";
+  }
+}
+
 /** Throws unless `tool` is an allowlisted, read-only tool. */
 export function assertToolAllowed(tool: string, policies: Record<string, ToolPolicy> = TOOL_POLICIES): asserts tool is ToolName {
   const policy = Object.hasOwn(policies, tool) ? policies[tool] : undefined;

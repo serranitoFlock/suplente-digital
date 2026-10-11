@@ -14,7 +14,7 @@ import { buildIndexFromDocs } from "../src/rag/ingest.js";
 import { Retriever, type VectorIndex } from "../src/rag/retriever.js";
 import type { ConversationTurn } from "../src/graph/state.js";
 import { MockToolProvider } from "../src/tools/mock-provider.js";
-import type { ToolCall, ToolProvider } from "../src/tools/types.js";
+import { ToolCallError, type ToolCall, type ToolProvider } from "../src/tools/types.js";
 import { FakeEmbedder } from "./helpers/fake-embedder.js";
 
 const pipelineHistory: ConversationTurn[] = [
@@ -148,6 +148,27 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
     expect(state.outcome).toBe("answered");
     expect(state.answer).toContain("DEMO-102 en progreso");
     expect(state.answer).toContain("get_ticket vía mock");
+  });
+
+  it("answers that the read-only query failed and logs a pending item when the tool fails", async () => {
+    const failing: ToolProvider = {
+      name: "mcp",
+      call: async (call) => {
+        throw new ToolCallError(call.tool, "timeout");
+      },
+    };
+    const graph = buildGraph({
+      llm: fakeLlm({ route: "task", tool: '{"tool":"search_tickets","args":{"query":"cdn"}}' }, calls),
+      retriever: new Retriever(index, embedder, { docSlots: 2, minScore: 0.3 }),
+      tools: failing,
+      pending,
+    });
+    const { state } = await askAgent(graph, "Buscá tickets del cdn", "tf1");
+    expect(state.outcome).toBe("unknown");
+    expect(state.answer).toMatch(/No pude completar la consulta de solo lectura/);
+    expect(state.answer).not.toMatch(/timeout|ToolCallError/);
+    expect(calls).not.toContain("tool_summary");
+    expect(await pending.list()).toMatchObject([{ reason: "tool_failure", topic: "cdn", question: "Buscá tickets del cdn" }]);
   });
 
   it("pauses sensitive requests for human approval and records the decision", async () => {

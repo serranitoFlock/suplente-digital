@@ -1,0 +1,19 @@
+{
+  "tools": {
+    "get_ticket": {
+      "name": "jira_get_issue",
+      "args": { "issue_key": { "arg": "key" } }
+    },
+    "search_tickets": {
+      "name": "jira_search",
+      "args": {
+        "jql": { "template": "project = DEMO AND text ~ \"{query}\" ORDER BY updated DESC" },
+        "limit": { "value": 10 }
+      }
+    },
+    "list_failed_pipelines": {
+      "name": "gitlab_list_failed_jobs",
+      "args": { "days": { "arg": "sinceDays" }, "project": { "value": "acme/web-components" } }
+    }
+  }
+}

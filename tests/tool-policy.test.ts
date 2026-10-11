@@ -66,6 +66,14 @@ describe("McpToolProvider (fake MCP client)", () => {
     ).rejects.toThrow(/search_issues/);
   });
 
+  it("checks the annotations of the remote tool named by a full mapping and closes the client", async () => {
+    let closed = false;
+    const client = { ...fakeClient([{ name: "jira_update_issue", annotations: { destructiveHint: true } }]), close: async () => void (closed = true) };
+    const mapping = { ...toolNames, get_ticket: { name: "jira_update_issue", args: { issue_key: { arg: "key" } } } };
+    await expect(McpToolProvider.fromClient(client, mapping)).rejects.toThrow(/jira_update_issue/);
+    expect(closed).toBe(true);
+  });
+
   it("refuses a mapping for a local tool name outside the allowlist", async () => {
     const mapping = { ...toolNames, delete_ticket: "delete_issue" } as unknown as Record<ToolName, string>;
     await expect(McpToolProvider.fromClient(fakeClient(remote()), mapping)).rejects.toThrow(ToolNotAllowedError);

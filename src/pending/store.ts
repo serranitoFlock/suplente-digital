@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-/** `security_refusal`: a refused request for secrets / the system prompt / a jailbreak (security event). */
-export type PendingReason = "unknown" | "escalated" | "unsupported_task" | "security_refusal";
+/**
+ * `security_refusal`: a refused request for secrets / the system prompt / a jailbreak (security event).
+ * `tool_failure`: a read-only tool call could not be completed (timeout, server down, remote error).
+ */
+export type PendingReason = "unknown" | "escalated" | "unsupported_task" | "security_refusal" | "tool_failure";
 
 export interface PendingEntry {
   id: string;

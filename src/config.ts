@@ -8,6 +8,7 @@ import { resolveAllowedLinkHosts } from "./security/guards.js";
 import { resolveConcurrency } from "./service/assistant-service.js";
 import { resolveFlag } from "./rag/engram-config.js";
 import { DEFAULT_CONTEXT, resolveSlotCount } from "./rag/context-selection.js";
+import { resolveCallTimeoutMs } from "./tools/mcp-config.js";
 
 const root = process.cwd();
 const env = (name: string): string | undefined => process.env[name]?.trim() || undefined;
@@ -63,8 +64,15 @@ export const config = {
   },
   /** Show `[n]` markers and the cited sources in replies (`SHOW_CITATIONS`, default false); logs always keep them. */
   presentation: { showCitations: resolveShowCitations(process.env.SHOW_CITATIONS) },
+  /**
+   * MCP server for the read-only tools. `MCP_TOOLS_CONFIG` (default `config/mcp-tools.local.json`,
+   * optional) maps each tool to a remote name and arguments; without it the `MCP_TOOL_*` names are used
+   * with the arguments unchanged. `MCP_CALL_TIMEOUT_MS` (default 20000) bounds every tool call.
+   */
   mcp: {
     command: env("MCP_SERVER_COMMAND"),
+    toolsConfigPath: resolve(root, env("MCP_TOOLS_CONFIG") ?? "config/mcp-tools.local.json"),
+    callTimeoutMs: resolveCallTimeoutMs(process.env.MCP_CALL_TIMEOUT_MS),
     args: env("MCP_SERVER_ARGS")?.split(/\s+/) ?? [],
     toolNames: {
       get_ticket: env("MCP_TOOL_GET_TICKET") ?? "get_issue",
