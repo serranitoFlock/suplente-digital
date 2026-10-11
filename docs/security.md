@@ -108,6 +108,28 @@ Residual risk: anyone who can talk to the bot can get answers from every indexed
 
 Unit tests: `tests/security.test.ts` (delimiters, output guard, prompt rules, fixture indexing), `tests/tool-policy.test.ts` (allowlist and MCP refusals), `tests/router.test.ts` (refusal, prompt-leak, ticket-mutation and CI-write rules), `tests/graph.test.ts` (refusal without model call or approval, script failures), `tests/mcp-integration.test.ts` (fake MCP server), `tests/script-guard.test.ts`, `tests/scripts.test.ts`, `tests/script-provider.test.ts` (write scripts never run, timeout, output cap, env allowlist).
 
+## HTTP API surface
+
+`npm run serve` (`src/serve.ts`, `src/http/*`) adds a network surface over the same service. It does not add any capability: the API can submit questions, read job state and decide approvals, exactly like the CLI; the bot still never executes write actions.
+
+| Control | Detail | Where |
+|---------|--------|-------|
+| Bind address | `127.0.0.1` by default (`ASSISTANT_API_HOST`); binding elsewhere is an explicit choice | `src/http/config.ts` |
+| Two token scopes | `ASSISTANT_API_TOKEN` (client: submit, own job status, own events) and `ASSISTANT_ADMIN_TOKEN` (admin: also approve/reject, list every job, pending log, every event). The server refuses to start if either is missing, shorter than 24 characters or both are equal | `src/http/config.ts`, `src/http/server.ts` |
+| Token comparison | SHA-256 digests compared with `crypto.timingSafeEqual` (fixed length and time); both tokens are always checked. Tokens never appear in logs or error messages | `src/http/auth.ts` |
+| Requester isolation | The client scope must name a `requester` to read a job or subscribe to events and only sees that requester's jobs; a job of someone else answers 404, never 403, so its existence does not leak | `src/http/server.ts` |
+| Least disclosure | The client scope never receives an escalation draft, the route or a technical error detail; drafts go only to the admin scope (the human backup) | `src/http/views.ts` |
+| Input limits | JSON only (`415` otherwise), 16 KB body (`413`), zod-validated fields (`text` 1–4000 chars, `requester` ≤ 200) with `422` listing field paths; malformed JSON `400`; errors are `{ error: { code, message } }` without stack traces | `src/http/server.ts` |
+| Logging | One stderr line per request: method, path (no query string), status, latency | `src/http/server.ts` |
+| Exactly-once decisions | Approve/reject reuse the service's conditional transition: a second decision answers `409 not_pending` | `src/service/assistant-service.ts` |
+
+What remains open:
+
+- **Tokens are shared secrets, not identities.** Whoever holds the client token can submit as any `requester`; the adapter (Teams) is trusted to map the real sender to `requester`. There is no per-human authentication for the admin panel yet (T20): everyone with the admin token is "the human backup".
+- **No TLS in the process.** For anything beyond localhost, put a reverse proxy with TLS (and, ideally, network restrictions) in front; plain HTTP would expose the tokens.
+- **No rate limiting or token rotation.** A leaked client token lets someone queue work (and spend model time) until it is changed and the server restarted.
+- **Single process per database.** Running the CLI and the server on the same `ASSISTANT_DB_PATH` at once breaks the single-owner assumption of the job queue and recovery.
+
 ## Residual risks
 
 - **Prompt-level defenses are probabilistic.** A different phrasing can still make the model follow an injected instruction inside the answer text (e.g. answer something wrong, or say the canary). The output guard catches links and token formats, not arbitrary wording. Mitigation in practice: keep `knowledge/` under code review like any other code.
@@ -118,4 +140,4 @@ Unit tests: `tests/security.test.ts` (delimiters, output guard, prompt rules, fi
 - **The script guard is a heuristic.** A script that writes through a binary, an obfuscated call or an API the guard does not know passes it. Registering a script is a human review decision; give it a read-only token.
 - **MCP wiring is proven against a fake server only.** Mapping, timeout and failure handling are tested locally; the real Jira / GitLab servers (behind the VPN) have not been exercised yet (T2).
 - **The human backup can still approve a bad draft.** Drafts state the risk, but the decision is human.
-- **No authentication in the CLI MVP.** A Teams adapter must map requesters to identities before any per-user data is exposed.
+- **No per-user authentication.** The CLI has a single local user; the HTTP API authenticates the adapter and the human backup with shared tokens (see [HTTP API surface](#http-api-surface)). A Teams adapter must map requesters to identities before any per-user data is exposed.

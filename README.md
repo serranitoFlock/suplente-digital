@@ -41,7 +41,7 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 
 1. Reemplazar `knowledge/` por los runbooks y FAQs reales de la persona y ejecutar `npm run ingest`; reescribir `evals/questions.json` con preguntas reales (y `expectedSources`) para medirlo.
 2. Conectar los servidores MCP reales (Jira / GitLab) con una credencial de **solo lectura**: `MCP_SERVER_COMMAND` + un archivo de mapeo (`MCP_TOOLS_CONFIG`) con los nombres y argumentos de cada servidor. El mapeo, el timeout y las fallas ya están probados contra un servidor MCP falso local; falta ejecutarlo contra los servidores reales, que solo son accesibles por VPN. Registrar los scripts de consulta del equipo (por ejemplo, monitores de pipelines) en `SCRIPTS_CONFIG` (ver [Integraciones de solo lectura](#integraciones-de-solo-lectura)).
-3. Agregar un adaptador para Teams (o Slack) sobre los eventos de `AssistantService` (ver [Acuse de recibo inmediato](#acuse-de-recibo-inmediato)); la cola, el checkpointer y la memoria ya persisten en SQLite (ver [Persistencia y reinicios](#persistencia-y-reinicios)).
+3. Agregar un adaptador para Teams (o Slack) sobre la [API HTTP](#api-http) (`npm run serve`): envía los pedidos con el token de cliente y entrega los eventos del stream SSE; las aprobaciones las hace el suplente humano con el token de administración. La cola, el checkpointer y la memoria ya persisten en SQLite (ver [Persistencia y reinicios](#persistencia-y-reinicios)).
 4. Enviar `data/traces.jsonl` al stack de observabilidad del equipo mediante un `TraceExporter` (OTel / Langfuse).
 
 **Limitaciones.**
@@ -62,6 +62,7 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 | Seguridad | `src/security/guards.ts`, `src/graph/router.ts` (red de seguridad), `TOOL_POLICIES`, aprobación humana (human-in-the-loop) | [`docs/security.md`](docs/security.md) (en inglés) (lethal trifecta, OWASP LLM01/02/06); inyecciones resistidas en `npm run eval` |
 | Costo | Modelo local por defecto (sin costo de API), uso de tokens por llamada, tarifas `LLM_COST_*` → costo estimado por pedido | [Observabilidad y costo](#observabilidad-y-costo), [Impacto de negocio](#impacto-de-negocio); tokens y costo en `npm run eval` |
 | Impacto de negocio | Registro de pendientes + resumen de bienvenida (`src/pending/*`), derivación en lugar de fallas silenciosas | [Impacto de negocio](#impacto-de-negocio) |
+| API HTTP | `src/http/*` (`node:http` + zod, dos scopes de token, aislamiento por solicitante, SSE), `src/serve.ts` | [API HTTP](#api-http), [`docs/spec.md`](docs/spec.md) (en inglés) → HTTP API; `tests/http-api.test.ts` |
 | Quality gate | `tests/*` (LLM y embeddings falsos), `.github/workflows/ci.yml` | Badge de CI al inicio |
 
 ## Resultados de la evaluación
@@ -162,6 +163,7 @@ Otros scripts:
 
 | Script | Qué hace |
 |--------|--------------|
+| `npm run serve` | API HTTP sobre el mismo asistente (ver [API HTTP](#api-http)); no usar a la vez que `npm run dev` sobre la misma base |
 | `npm run summary` | Informe de bienvenida a partir de `data/pending.json` |
 | `npm run eval` | Ejecuta `evals/questions.json` a través del grafo e imprime recall@k / MRR de recuperación, precisión de ruteo, tasa de aciertos de hechos, "no sé" correctos, inyecciones resistidas, latencia p50/p95, tokens y costo estimado |
 | `npm run eval:retrieval` | Métricas solo del retriever (recall@1, recall@k, MRR); no requiere LLM |
@@ -216,6 +218,68 @@ Los trabajos, las decisiones y los checkpoints del grafo se guardan en disco, as
 
 Comandos de la CLI: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/stats`, `/log`, `/ayuda`, `/salir`. Los resultados se imprimen etiquetados con su número y el prompt se vuelve a dibujar, de modo que se puede seguir escribiendo mientras se procesan las preguntas anteriores. Con `/salir` o al terminar la entrada, la CLI espera a que finalicen los trabajos en curso; los trabajos que siguen esperando aprobación se informan, no se ejecuta nada y quedan guardados para la próxima sesión.
 
+## API HTTP
+
+`npm run serve` expone el mismo asistente por HTTP (JSON, `node:http`, sin dependencias nuevas) para que otras superficies lo usen: el adaptador de Teams (quien pregunta) y el panel del suplente humano. Usa la misma base SQLite y la misma recuperación al arrancar que la CLI. **Un solo proceso por base**: no correr la CLI y el servidor a la vez sobre el mismo `ASSISTANT_DB_PATH`.
+
+Configuración (variables de entorno):
+
+| Variable | Por defecto | Qué hace |
+|----------|-------------|----------|
+| `ASSISTANT_API_HOST` | `127.0.0.1` | Dirección de escucha (solo local por defecto) |
+| `ASSISTANT_API_PORT` | `8787` | Puerto |
+| `ASSISTANT_API_TOKEN` | — (obligatoria) | Token del scope **cliente** (el adaptador de Teams) |
+| `ASSISTANT_ADMIN_TOKEN` | — (obligatoria) | Token del scope **admin** (el suplente humano / panel) |
+
+El servidor no arranca si falta un token, si tiene menos de 24 caracteres o si los dos son iguales (generarlos con `openssl rand -hex 32`).
+
+| Método | Ruta | Scope | Respuestas |
+|--------|------|-------|------------|
+| `GET` | `/health` | público | 200 `{ status: "ok" }` |
+| `POST` | `/v1/jobs` | cliente, admin | 202 `{ id, ack }`; 400, 413, 415, 422 |
+| `GET` | `/v1/jobs/:id` | cliente (con `?requester=`), admin | 200 trabajo; 404, 422 |
+| `GET` | `/v1/jobs` | admin | 200 `{ jobs }` (filtro opcional `?status=`); 422 |
+| `POST` | `/v1/jobs/:id/approve` | admin | 200 `{ result: "accepted" }`; 404 `not_found`, 409 `not_pending` |
+| `POST` | `/v1/jobs/:id/reject` | admin | igual que `approve` |
+| `GET` | `/v1/pending` | admin | 200 `{ entries }` (registro de pendientes) |
+| `GET` | `/v1/events` | cliente (con `?requester=`), admin | 200 `text/event-stream` |
+
+Autenticación con `Authorization: Bearer <token>`: sin token o con uno inválido → 401; token de cliente en una ruta de admin → 403. Los errores son `{ "error": { "code", "message" } }` (las validaciones agregan `issues` con la ruta de cada campo), sin trazas ni detalles internos. Cuerpo JSON de hasta 16 KB; `text` de 1 a 4000 caracteres, `requester` de hasta 200.
+
+**Aislamiento por solicitante.** Con el token de cliente, `requester` es obligatorio al enviar, y para ver un trabajo o escuchar eventos hay que pasar `?requester=`: solo se ven los trabajos y eventos de ese solicitante; un trabajo de otro responde 404 (nunca 403, para no revelar que existe). El scope cliente nunca recibe el borrador de una escalación ni el detalle técnico de un error. El token de cliente es un secreto compartido del adaptador: el adaptador es quien garantiza que `requester` es la identidad real de quien escribe.
+
+```bash
+export API=http://127.0.0.1:8787 CLIENT=<ASSISTANT_API_TOKEN> ADMIN=<ASSISTANT_ADMIN_TOKEN>
+
+# Enviar una consulta (responde al instante con el acuse)
+curl -s -X POST $API/v1/jobs -H "Authorization: Bearer $CLIENT" -H 'Content-Type: application/json' \
+  -d '{"text":"¿Cómo publico una versión nueva de @acme/ui-kit?","requester":"ana"}'
+# → {"id":7,"ack":"Recibido 👀 (consulta #7). Lo estoy revisando y te respondo en cuanto lo tenga."}
+
+# Estado de la consulta (solo las de "ana")
+curl -s "$API/v1/jobs/7?requester=ana" -H "Authorization: Bearer $CLIENT"
+
+# Suplente humano: ver lo que espera aprobación y decidir
+curl -s "$API/v1/jobs?status=needs_approval" -H "Authorization: Bearer $ADMIN"
+curl -s -X POST $API/v1/jobs/8/approve -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' -d '{"note":"ok"}'
+```
+
+Eventos en tiempo real (Server-Sent Events, con un comentario `: ping` cada 15 s):
+
+```bash
+curl -N "$API/v1/events?requester=ana" -H "Authorization: Bearer $CLIENT"
+# event: done
+# data: {"id":7,"requester":"ana","question":"¿Cómo publico…?","answer":"Seguí estos pasos: …"}
+```
+
+| Evento | Scope cliente | Scope admin (agrega) |
+|--------|---------------|----------------------|
+| `done` | `id`, `requester`, `question`, `answer` | `route` |
+| `needs_approval` | `id`, `requester`, `question` | `draft` |
+| `failed` | `id`, `requester`, `question`, `message` amigable | `error` técnico |
+
+Con el token de admin, `GET /v1/events` recibe los eventos de todos (o de uno, con `?requester=`). Cada pedido escribe una línea en stderr (método, ruta, estado, ms), sin tokens ni query string. `Ctrl+C` / `SIGTERM` deja de aceptar pedidos, espera las consultas en curso y cierra todo.
+
 ## Citas y fuentes
 
 El grafo siempre cita con marcadores `[n]` y agrega un bloque "Fuentes:" con **solo** los documentos citados en la respuesta (los recuperados que no se citan se descartan). Mostrarlos o no es una decisión de presentación: con `SHOW_CITATIONS=false` (por defecto) la respuesta al usuario sale sin marcadores ni bloque de fuentes; con `SHOW_CITATIONS=true` se muestran los marcadores y las fuentes citadas (archivo › sección). Las evaluaciones y el log diario conservan siempre la respuesta completa con sus citas.
@@ -250,7 +314,7 @@ Las preguntas sobre el propio asistente ("¿qué podés hacer?", "¿cómo funcio
 
 El estado del asistente vive en un único archivo SQLite (`ASSISTANT_DB_PATH`, por defecto `data/assistant.db`, ignorado por git junto con sus archivos `-wal` / `-shm`). Usa el módulo `node:sqlite` que trae Node (≥ 22.13), así que no hay dependencias nativas que compilar. Ahí se guardan los checkpoints del grafo de LangGraph, los trabajos (con su número, que sigue creciendo entre sesiones) y la memoria de conversación de cada solicitante.
 
-Al arrancar, la CLI recupera lo que quedó de la sesión anterior y lo informa en una línea (solo si hay algo):
+Al arrancar, la CLI (o el servidor de la [API HTTP](#api-http)) recupera lo que quedó de la sesión anterior y lo informa en una línea (solo si hay algo):
 
 | Estado al cerrar | Qué pasa al reiniciar |
 |------------------|-----------------------|
@@ -428,4 +492,5 @@ Modelo de amenazas completo (lethal trifecta, OWASP LLM01/02/06, riesgos residua
 - Los pedidos de merge, deploy (a producción o "ejecutá el deploy"), eliminación, cambio de permisos, reintentar / cancelar / relanzar pipelines o jobs, o correr un script cuyo nombre indica escritura ("corré el script retry-job.sh") se derivan mediante una regla determinística, independientemente del ruteo del modelo; en cambio, las preguntas sobre *cómo* realizar esos procedimientos ("¿Cómo despliego a producción?") se responden a partir de los documentos. Todo lo relacionado con secretos se rechaza siempre.
 - Las respuestas provienen solo de documentos recuperados, con citas; de lo contrario, el bot responde "No sé" y registra la pregunta.
 - Las notas de Engram se indexan solo desde una allowlist local de proyectos, con alcance `project`, sin notas personales, borradas, reemplazadas ni con formatos de token; la allowlist (`config/*.local.json`) y las exportaciones (`data/engram/`) están ignoradas por git.
+- La API HTTP escucha solo en `127.0.0.1` por defecto y exige dos tokens distintos (cliente y admin, comparados en tiempo constante); el scope cliente solo ve los trabajos del solicitante que nombra y nunca recibe borradores. Para exponerla fuera de la máquina, ponerla detrás de un proxy con TLS (ver [`docs/security.md`](docs/security.md)).
 - `data/` (índice, exportaciones de Engram, registro de pendientes, traces y log diario de conversaciones) y `.env` están ignorados por git.

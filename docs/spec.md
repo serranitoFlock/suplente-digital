@@ -51,6 +51,31 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 - Single-process assumption: one process owns a database's queue. Old jobs and checkpoints are not pruned yet.
 - Tests keep the in-memory defaults (`InMemoryJobStore`, `InMemoryConversationMemory`, `MemorySaver`) when no store is passed.
 
+## HTTP API
+
+`npm run serve` (`src/serve.ts`) builds the same assistant as the CLI (`createAssistant`, `src/assistant.ts`: same stores, same `recover()` at startup) and serves it with `createApiServer` (`src/http/server.ts`, `node:http`, JSON). One process per database: never run the CLI and the server on the same `ASSISTANT_DB_PATH` at once.
+
+- Config: `ASSISTANT_API_HOST` (default `127.0.0.1`), `ASSISTANT_API_PORT` (default `8787`), `ASSISTANT_API_TOKEN` (client scope), `ASSISTANT_ADMIN_TOKEN` (admin scope). Startup fails if a token is missing, shorter than 24 characters, or both are equal.
+- Auth: `Authorization: Bearer <token>`. Missing/invalid → `401` (`WWW-Authenticate: Bearer`); client token on an admin route → `403`.
+- Errors: `{ "error": { "code", "message" } }`; validation adds `issues: [{ path, message }]`. Codes: `unauthorized`, `forbidden`, `not_found`, `method_not_allowed` (with `Allow`), `invalid_json` (400), `unsupported_media_type` (415), `payload_too_large` (413, body > 16 KB), `validation_failed` (422), `not_pending` (409), `internal` (500, no details).
+
+| Method | Path | Scope | Body / query | Success | Errors |
+|--------|------|-------|--------------|---------|--------|
+| GET | `/health` | public | — | 200 `{ status: "ok" }` | — |
+| POST | `/v1/jobs` | client, admin | `{ text: 1..4000, requester?: 1..200 }` (requester required for client) | 202 `{ id, ack }` | 400, 413, 415, 422 |
+| GET | `/v1/jobs/:id` | client, admin | client: `?requester=` (required) | 200 job view | 404, 422 |
+| GET | `/v1/jobs` | admin | `?status=queued\|running\|needs_approval\|done\|failed` | 200 `{ jobs }` | 422 |
+| POST | `/v1/jobs/:id/approve` | admin | `{ note?: ≤4000 }` or empty body | 200 `{ result: "accepted" }` | 404 `not_found`, 409 `not_pending` |
+| POST | `/v1/jobs/:id/reject` | admin | same | same | same |
+| GET | `/v1/pending` | admin | — | 200 `{ entries }` (pending log) | — |
+| GET | `/v1/events` | client, admin | client: `?requester=` (required); admin: optional filter | 200 `text/event-stream` | 422 |
+
+- Requester isolation: the client scope sees only jobs and events whose `requester` equals the one it names; any other job answers 404 (existence is not leaked). The adapter holding the client token is trusted to set `requester` to the real sender.
+- Job view: admin gets the full `JobView` (including `route`, `draft`, `error`); client gets `id`, `question`, `requester`, `status`, `createdAt`, `updatedAt` and `answer` when done.
+- SSE: frames `event: <name>` + `data: <json>`; a `: connected` comment on open and `: ping` every 15 s; listeners are removed when the client disconnects. Payloads: `done` `{ id, requester, question, answer }` (+ `route` for admin); `needs_approval` `{ id, requester, question }` (+ `draft` for admin); `failed` `{ id, requester, question, message }` (+ `error` for admin).
+- Logging: one stderr line per request (`METHOD /path STATUS Nms`), without query strings or tokens.
+- Shutdown (`SIGINT` / `SIGTERM`): stop accepting connections, wait for `service.idle()`, close open event streams, then tools, traces and the database.
+
 ## Daily conversation log
 
 - `DailyJsonlLog` (`src/logging/conversation-log.ts`) appends one JSON line per completed request to `data/logs/YYYY-MM-DD.jsonl` (local date of the write; directory `LOG_DIR`; gitignored). Writes are serialized, like the pending store, so concurrent jobs never lose or interleave lines.
@@ -188,6 +213,7 @@ Threat model and residual risks: [`security.md`](security.md).
 - [x] Follow-ups resolve against the requester's recent tool results; unresolvable references get a clarification question, never a tool call with an invented id.
 - [x] Engram notes are indexed only from allowlisted projects and only when they are project-scoped, live, the latest version of their topic, not superseded and free of token formats; real exports, the allowlist and the index never enter git.
 - [x] Jobs waiting for approval, queued and interrupted jobs and conversation memory survive a restart; an approval made after a restart resumes the job exactly once.
+- [x] The HTTP API submits with an instant ack, streams `done` / `needs_approval` / `failed` over SSE, and lets only the admin token approve/reject (exactly once), list every job and read the pending log; the client token sees only its named requester's jobs and never drafts.
 - [x] Unit tests cover chunking, ranking, router parsing, safety net, pending store/summary, tools, graph flows and the assistant service (ack, queue limit, done / failed / approval flows) with a fake LLM or fake graph.
 
 ## Eval plan

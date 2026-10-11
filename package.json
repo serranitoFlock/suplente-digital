@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
+    "serve": "tsx src/serve.ts",
     "ingest": "tsx src/rag/ingest.ts",
     "engram:export": "tsx src/rag/engram-export.ts",
     "summary": "tsx src/pending/summary.ts",
