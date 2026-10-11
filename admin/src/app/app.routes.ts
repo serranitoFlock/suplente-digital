@@ -19,6 +19,16 @@ export const routes: Routes = [
         title: 'Aprobaciones · Suplente digital',
         loadComponent: () => import('./features/approvals/approvals').then((m) => m.Approvals),
       },
+      {
+        path: 'historial',
+        title: 'Historial · Suplente digital',
+        loadComponent: () => import('./features/history/history').then((m) => m.History),
+      },
+      {
+        path: 'sin-responder',
+        title: 'Sin responder · Suplente digital',
+        loadComponent: () => import('./features/unanswered/unanswered').then((m) => m.Unanswered),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

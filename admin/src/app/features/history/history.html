@@ -1,0 +1,131 @@
+<header class="history__header">
+  <h1 class="history__title">
+    Historial
+    @if (list.hasValue()) {
+      <span class="history__count">({{ jobs().length }})</span>
+    }
+  </h1>
+  <button mat-stroked-button type="button" (click)="reload()" [disabled]="list.isLoading()">
+    <mat-icon aria-hidden="true">refresh</mat-icon>
+    Actualizar
+  </button>
+</header>
+
+<form
+  class="history__filters"
+  role="search"
+  aria-label="Filtrar pedidos"
+  (submit)="$event.preventDefault()"
+>
+  <mat-form-field appearance="outline">
+    <mat-label>Estado</mat-label>
+    <mat-select [value]="status()" (selectionChange)="status.set($event.value)">
+      <mat-option [value]="undefined">Todos</mat-option>
+      @for (value of statuses; track value) {
+        <mat-option [value]="value">{{ statusLabels[value] }}</mat-option>
+      }
+    </mat-select>
+  </mat-form-field>
+  <mat-form-field appearance="outline">
+    <mat-label>Solicitante</mat-label>
+    <mat-select [value]="requester()" (selectionChange)="requester.set($event.value)">
+      <mat-option [value]="undefined">Todos</mat-option>
+      @for (name of requesters(); track name) {
+        <mat-option [value]="name">{{ name }}</mat-option>
+      }
+    </mat-select>
+  </mat-form-field>
+  <mat-form-field appearance="outline" class="history__search">
+    <mat-label>Buscar en pregunta o respuesta</mat-label>
+    <input #search matInput type="search" [value]="text()" (input)="text.set(search.value)" />
+  </mat-form-field>
+</form>
+
+@if (list.isLoading()) {
+  <mat-progress-bar mode="indeterminate" aria-label="Cargando pedidos" />
+}
+
+@if (list.error()) {
+  <div class="history__message history__message--error" role="alert">
+    <p>No se pudo cargar el historial.</p>
+    <button mat-button type="button" (click)="reload()">Reintentar</button>
+  </div>
+} @else if (list.hasValue()) {
+  @if (jobs().length === 0) {
+    <p class="history__message" role="status">Todavía no hay pedidos</p>
+  } @else if (filtered().length === 0) {
+    <p class="history__message" role="status">Ningún pedido coincide con los filtros</p>
+  } @else {
+    <div class="history__table-wrap">
+      <table
+        mat-table
+        [dataSource]="rows()"
+        matSort
+        matSortActive="createdAt"
+        matSortDirection="desc"
+        matSortDisableClear
+        (matSortChange)="onSort($event)"
+        aria-label="Pedidos"
+      >
+        <ng-container matColumnDef="id">
+          <th mat-header-cell *matHeaderCellDef>#</th>
+          <td mat-cell *matCellDef="let job">
+            <button
+              mat-button
+              type="button"
+              class="history__open"
+              (click)="$event.stopPropagation(); open(job)"
+              [attr.aria-label]="'Ver el detalle del pedido #' + job.id"
+            >
+              {{ job.id }}
+            </button>
+          </td>
+        </ng-container>
+        <ng-container matColumnDef="createdAt">
+          <th
+            mat-header-cell
+            *matHeaderCellDef
+            mat-sort-header
+            sortActionDescription="Ordenar por fecha"
+          >
+            Fecha
+          </th>
+          <td mat-cell *matCellDef="let job">
+            <time [attr.datetime]="job.createdAt">{{
+              job.createdAt | date: 'dd/MM/yyyy HH:mm'
+            }}</time>
+          </td>
+        </ng-container>
+        <ng-container matColumnDef="requester">
+          <th mat-header-cell *matHeaderCellDef>Solicitante</th>
+          <td mat-cell *matCellDef="let job">{{ job.requester ?? '—' }}</td>
+        </ng-container>
+        <ng-container matColumnDef="question">
+          <th mat-header-cell *matHeaderCellDef>Pregunta</th>
+          <td mat-cell *matCellDef="let job" class="history__question">{{ job.question }}</td>
+        </ng-container>
+        <ng-container matColumnDef="status">
+          <th mat-header-cell *matHeaderCellDef>Estado</th>
+          <td mat-cell *matCellDef="let job">
+            <span [class]="'status status--' + job.status">{{ statusLabel(job) }}</span>
+          </td>
+        </ng-container>
+        <tr mat-header-row *matHeaderRowDef="columns"></tr>
+        <tr
+          mat-row
+          *matRowDef="let job; columns: columns"
+          class="history__row"
+          (click)="open(job)"
+        ></tr>
+      </table>
+    </div>
+    <mat-paginator
+      [length]="filtered().length"
+      [pageIndex]="currentPage()"
+      [pageSize]="pageSize()"
+      [pageSizeOptions]="pageSizes"
+      (page)="onPage($event)"
+      aria-label="Páginas del historial"
+    />
+  }
+}

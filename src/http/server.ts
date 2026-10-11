@@ -3,12 +3,12 @@ import { z } from "zod";
 import type { PendingEntry } from "../pending/store.js";
 import type { AssistantEvents, AssistantService, DecisionResult } from "../service/assistant-service.js";
 import { createAuthenticator, type ApiTokens, type Scope } from "./auth.js";
-import { doneForScope, failedForScope, jobForScope, needsApprovalForScope } from "./views.js";
+import { doneForScope, failedForScope, jobForScope, needsApprovalForScope, pendingSummaryView } from "./views.js";
 
 /**
  * HTTP API over `AssistantService` (`node:http`, JSON in/out). Two bearer scopes: `client` (a requester-facing
  * adapter such as Teams: submit, own job status, own events) and `admin` (the human backup: everything, plus
- * approve/reject, every job and the pending log). Errors are `{ error: { code, message } }` without internals.
+ * approve/reject, every job and the pending log and its summary). Errors are `{ error: { code, message } }` without internals.
  */
 
 export interface ApiServerOptions {
@@ -172,6 +172,7 @@ export function createApiServer(options: ApiServerOptions): Server {
     { pattern: /^\/v1\/jobs\/(\d+)\/approve$/, methods: { POST: { scope: "admin", handle: (ctx, [id]) => decide(ctx, id!, "approve") } } },
     { pattern: /^\/v1\/jobs\/(\d+)\/reject$/, methods: { POST: { scope: "admin", handle: (ctx, [id]) => decide(ctx, id!, "reject") } } },
     { pattern: /^\/v1\/pending$/, methods: { GET: { scope: "admin", handle: async ({ res }) => send(res, 200, { entries: await pending.list() }) } } },
+    { pattern: /^\/v1\/pending\/summary$/, methods: { GET: { scope: "admin", handle: async ({ res }) => send(res, 200, pendingSummaryView(await pending.list())) } } },
     { pattern: /^\/v1\/events$/, methods: { GET: { scope: "client", handle: events } } },
   ];
 

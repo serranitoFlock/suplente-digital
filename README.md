@@ -242,6 +242,7 @@ El servidor no arranca si falta un token, si tiene menos de 24 caracteres o si l
 | `POST` | `/v1/jobs/:id/approve` | admin | 200 `{ result: "accepted" }`; 404 `not_found`, 409 `not_pending` |
 | `POST` | `/v1/jobs/:id/reject` | admin | igual que `approve` |
 | `GET` | `/v1/pending` | admin | 200 `{ entries }` (registro de pendientes) |
+| `GET` | `/v1/pending/summary` | admin | 200 `{ total, topics }`: los pendientes agrupados por tema, con conteos por motivo, las preguntas sin respuesta, escalaciones (con decisión y nota), fallas de herramientas, rechazos de seguridad y el doc sugerido (`knowledge/<tema>.md`) |
 | `GET` | `/v1/events` | cliente (con `?requester=`), admin | 200 `text/event-stream` |
 
 Autenticación con `Authorization: Bearer <token>`: sin token o con uno inválido → 401; token de cliente en una ruta de admin → 403. Los errores son `{ "error": { "code", "message" } }` (las validaciones agregan `issues` con la ruta de cada campo), sin trazas ni detalles internos. Cuerpo JSON de hasta 16 KB; `text` de 1 a 4000 caracteres, `requester` de hasta 200.

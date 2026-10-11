@@ -116,6 +116,7 @@ describe("auth", () => {
     { path: "/v1/jobs/1/approve", method: "POST", body: {}, adminOnly: true },
     { path: "/v1/jobs/1/reject", method: "POST", body: {}, adminOnly: true },
     { path: "/v1/pending", method: "GET", adminOnly: true },
+    { path: "/v1/pending/summary", method: "GET", adminOnly: true },
     { path: "/v1/events?requester=ana", method: "GET", adminOnly: false },
   ];
 
@@ -219,6 +220,42 @@ describe("jobs", () => {
     const log = await call("/v1/pending", { token: ADMIN });
     expect(log.json.entries).toEqual([expect.objectContaining({ question: "¿?", reason: "unknown" })]);
     await runner.release("b", answered("x"));
+  });
+});
+
+describe("GET /v1/pending/summary", () => {
+  it("is empty when the pending log is empty", async () => {
+    const res = await call("/v1/pending/summary", { token: ADMIN });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ total: 0, topics: [] });
+  });
+
+  it("groups the pending log by topic for the panel, with a suggested doc where the bot had no answer", async () => {
+    await pending.append({ question: "¿Cómo purgo el CDN?", topic: "cdn", reason: "unknown" });
+    await pending.append({ question: "Reiniciá el CDN", topic: "cdn", reason: "unsupported_task" });
+    await pending.append({ question: "¿Me pasás la clave?", topic: "cdn", reason: "security_refusal" });
+    await pending.append({ question: "¿Aumento?", topic: "rrhh", reason: "escalated", draft: "Borrador", decision: "rejected", note: "No corresponde" });
+    await pending.append({ question: "¿Estado del deploy?", topic: "deploys", reason: "tool_failure" });
+
+    const res = await call("/v1/pending/summary", { token: ADMIN });
+    expect(res.status).toBe(200);
+    expect(res.json.total).toBe(5);
+    expect(res.json.topics.map((t: { topic: string }) => t.topic)).toEqual(["cdn", "deploys", "rrhh"]);
+    const [cdn, deploys, rrhh] = res.json.topics;
+    expect(cdn).toMatchObject({
+      count: 3,
+      counts: { unknown: 1, unsupported_task: 1, escalated: 0, security_refusal: 1, tool_failure: 0 },
+      suggestedDoc: "knowledge/cdn.md",
+    });
+    expect(cdn.unanswered).toEqual([
+      expect.objectContaining({ question: "¿Cómo purgo el CDN?", reason: "unknown", createdAt: expect.any(String) }),
+      expect.objectContaining({ question: "Reiniciá el CDN", reason: "unsupported_task" }),
+    ]);
+    expect(cdn.securityRefusals).toEqual([expect.objectContaining({ question: "¿Me pasás la clave?" })]);
+    expect(deploys.toolFailures).toEqual([expect.objectContaining({ question: "¿Estado del deploy?" })]);
+    expect(deploys.suggestedDoc).toBeUndefined();
+    expect(rrhh.escalations).toEqual([expect.objectContaining({ question: "¿Aumento?", decision: "rejected", note: "No corresponde" })]);
+    expect(JSON.stringify(res.json)).not.toContain("Borrador");
   });
 });
 

@@ -3,13 +3,7 @@
 export type JobStatus = 'queued' | 'running' | 'needs_approval' | 'done' | 'failed';
 
 export type JobRoute =
-  | 'question'
-  | 'task'
-  | 'sensitive'
-  | 'refuse'
-  | 'out_of_scope'
-  | 'clarify'
-  | 'capabilities';
+  'question' | 'task' | 'sensitive' | 'refuse' | 'out_of_scope' | 'clarify' | 'capabilities';
 
 export interface JobView {
   id: number;
@@ -62,3 +56,40 @@ export type AdminEvent =
   | { type: 'done'; data: DoneEventData }
   | { type: 'needs_approval'; data: NeedsApprovalEventData }
   | { type: 'failed'; data: FailedEventData };
+
+/** `GET /v1/pending/summary`: the pending log grouped by topic (`pendingSummaryView` in `src/http/views.ts`). */
+export type PendingReason =
+  'unknown' | 'unsupported_task' | 'escalated' | 'security_refusal' | 'tool_failure';
+
+export interface PendingItem {
+  id: string;
+  /** ISO 8601. */
+  createdAt: string;
+  question: string;
+}
+
+export interface UnansweredItem extends PendingItem {
+  reason: 'unknown' | 'unsupported_task';
+}
+
+export interface EscalationItem extends PendingItem {
+  decision?: 'approved' | 'rejected';
+  note?: string;
+}
+
+export interface TopicSummary {
+  topic: string;
+  count: number;
+  counts: Record<PendingReason, number>;
+  /** `knowledge/<topic>.md`, present when the bot had no answer for this topic. */
+  suggestedDoc?: string;
+  unanswered: UnansweredItem[];
+  escalations: EscalationItem[];
+  toolFailures: PendingItem[];
+  securityRefusals: PendingItem[];
+}
+
+export interface PendingSummary {
+  total: number;
+  topics: TopicSummary[];
+}

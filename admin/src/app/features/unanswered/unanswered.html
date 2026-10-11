@@ -1,0 +1,124 @@
+<header class="unanswered__header">
+  <h1 class="unanswered__title">Sin responder</h1>
+  <button mat-stroked-button type="button" (click)="reload()" [disabled]="summary.isLoading()">
+    <mat-icon aria-hidden="true">refresh</mat-icon>
+    Actualizar
+  </button>
+</header>
+
+@if (summary.isLoading()) {
+  <mat-progress-bar mode="indeterminate" aria-label="Cargando pendientes" />
+}
+
+@if (summary.error()) {
+  <div class="unanswered__message unanswered__message--error" role="alert">
+    <p>No se pudieron cargar los pendientes.</p>
+    <button mat-button type="button" (click)="reload()">Reintentar</button>
+  </div>
+} @else if (summary.hasValue()) {
+  @if (summary.value().total === 0) {
+    <p class="unanswered__message" role="status">No quedaron pendientes mientras no estabas</p>
+  } @else {
+    <p class="unanswered__intro">
+      Mientras no estabas quedaron {{ summary.value().total }} pendientes en {{ topics().length }}
+      {{ topics().length === 1 ? 'tema' : 'temas' }}.
+    </p>
+
+    @if (suggestions().length > 0) {
+      <section class="unanswered__docs" aria-labelledby="docs-title">
+        <h2 id="docs-title" class="unanswered__section-title">Docs sugeridos para escribir</h2>
+        <ul>
+          @for (suggestion of suggestions(); track suggestion.topic) {
+            <li>
+              <code>{{ suggestion.doc }}</code> — {{ suggestion.questions }}
+              {{ suggestion.questions === 1 ? 'pregunta' : 'preguntas' }} sobre «{{
+                suggestion.topic
+              }}»
+            </li>
+          }
+        </ul>
+      </section>
+    }
+
+    <ul class="unanswered__topics" aria-label="Pendientes por tema">
+      @for (topic of topics(); track topic.topic) {
+        <li>
+          <mat-card appearance="outlined" class="topic" [attr.aria-labelledby]="'topic-' + $index">
+            <mat-card-header>
+              <mat-card-title>
+                <h2 class="topic__title" [id]="'topic-' + $index">
+                  {{ topic.topic }} ({{ topic.count }})
+                </h2>
+              </mat-card-title>
+              <mat-card-subtitle class="topic__counts">
+                No supo responder: {{ topic.counts.unknown + topic.counts.unsupported_task }} ·
+                Escalaciones: {{ topic.counts.escalated }} · Fallas de herramientas:
+                {{ topic.counts.tool_failure }} · Rechazos de seguridad:
+                {{ topic.counts.security_refusal }}
+              </mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content>
+              @if (topic.unanswered.length > 0) {
+                <h3 class="topic__label topic__label--main">No supo responder</h3>
+                <ul class="topic__list topic__unanswered">
+                  @for (item of topic.unanswered; track item.id) {
+                    <li>
+                      <span class="topic__question">{{ item.question }}</span>
+                      <span class="topic__meta">
+                        {{ reasonLabel(item) }} ·
+                        <time [attr.datetime]="item.createdAt">{{
+                          item.createdAt | date: 'dd/MM/yyyy HH:mm'
+                        }}</time>
+                      </span>
+                    </li>
+                  }
+                </ul>
+                @if (topic.suggestedDoc) {
+                  <p class="topic__doc">
+                    Doc sugerido: <code>{{ topic.suggestedDoc }}</code>
+                  </p>
+                }
+              }
+              @if (topic.escalations.length > 0) {
+                <h3 class="topic__label">Escalaciones</h3>
+                <ul class="topic__list topic__escalations">
+                  @for (item of topic.escalations; track item.id) {
+                    <li>
+                      <span class="topic__question">{{ item.question }}</span>
+                      <span class="topic__meta">
+                        {{ decisionLabel(item) }}
+                        @if (item.note) {
+                          · Nota: <span class="topic__note">{{ item.note }}</span>
+                        }
+                      </span>
+                    </li>
+                  }
+                </ul>
+              }
+              @if (topic.toolFailures.length > 0) {
+                <h3 class="topic__label">Fallas de herramientas</h3>
+                <ul class="topic__list">
+                  @for (item of topic.toolFailures; track item.id) {
+                    <li>
+                      <span class="topic__question">{{ item.question }}</span>
+                    </li>
+                  }
+                </ul>
+              }
+              @if (topic.securityRefusals.length > 0) {
+                <h3 class="topic__label">Rechazos de seguridad</h3>
+                <ul class="topic__list">
+                  @for (item of topic.securityRefusals; track item.id) {
+                    <li>
+                      <span class="topic__question">{{ item.question }}</span>
+                    </li>
+                  }
+                </ul>
+              }
+            </mat-card-content>
+          </mat-card>
+        </li>
+      }
+    </ul>
+  }
+}

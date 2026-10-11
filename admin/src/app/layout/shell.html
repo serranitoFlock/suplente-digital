@@ -10,12 +10,22 @@
     >
       Aprobaciones
     </a>
-    <span matTooltip="Próximamente">
-      <button mat-button type="button" disabled>Historial</button>
-    </span>
-    <span matTooltip="Próximamente">
-      <button mat-button type="button" disabled>Sin responder</button>
-    </span>
+    <a
+      mat-button
+      routerLink="/historial"
+      routerLinkActive="shell__link--active"
+      ariaCurrentWhenActive="page"
+    >
+      Historial
+    </a>
+    <a
+      mat-button
+      routerLink="/sin-responder"
+      routerLinkActive="shell__link--active"
+      ariaCurrentWhenActive="page"
+    >
+      Sin responder
+    </a>
   </nav>
   <span class="shell__spacer"></span>
   <span class="shell__live" [class]="'shell__live--' + liveStatus()" role="status">

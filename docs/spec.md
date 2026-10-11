@@ -68,6 +68,7 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 | POST | `/v1/jobs/:id/approve` | admin | `{ note?: ≤4000 }` or empty body | 200 `{ result: "accepted" }` | 404 `not_found`, 409 `not_pending` |
 | POST | `/v1/jobs/:id/reject` | admin | same | same | same |
 | GET | `/v1/pending` | admin | — | 200 `{ entries }` (pending log) | — |
+| GET | `/v1/pending/summary` | admin | — | 200 `{ total, topics: [{ topic, count, counts: { unknown, unsupported_task, escalated, security_refusal, tool_failure }, suggestedDoc?, unanswered: [{ id, createdAt, question, reason }], escalations: [{ id, createdAt, question, decision?, note? }], toolFailures, securityRefusals }] }` (pending log grouped by topic, most entries first; `suggestedDoc` is `knowledge/<topic>.md` when the bot had no answer; no drafts) | — |
 | GET | `/v1/events` | client, admin | client: `?requester=` (required); admin: optional filter | 200 `text/event-stream` | 422 |
 
 - Requester isolation: the client scope sees only jobs and events whose `requester` equals the one it names; any other job answers 404 (existence is not leaked). The adapter holding the client token is trusted to set `requester` to the real sender.
