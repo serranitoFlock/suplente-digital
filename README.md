@@ -278,10 +278,10 @@ ollama serve                  # if it is not already running
 
 **PrismML Bonsai 27B (1-bit)**: temperatura recomendada 0.5 (el valor por defecto de `LLM_TEMPERATURE`):
 
-- Si la versión de Ollama admite el tipo de cuantización `Q1_0`: `ollama pull hf.co/prism-ml/Bonsai-27B-gguf:Q1_0` y configurar `LLM_MODEL=hf.co/prism-ml/Bonsai-27B-gguf:Q1_0`.
-- En caso contrario, usar el build de llama.cpp de PrismML y ejecutar su `llama-server` en el puerto 8080 con el GGUF de Bonsai; luego configurar `LLM_BASE_URL=http://localhost:8080/v1` y `LLM_MODEL` con el nombre de modelo que informa el servidor.
+- Con Ollama (opción recomendada; verificado en 0.40.2, que ejecuta `Q1_0` de forma nativa): `ollama pull hf.co/prism-ml/Bonsai-27B-gguf:Q1_0` y configurar `LLM_MODEL=hf.co/prism-ml/Bonsai-27B-gguf:Q1_0`.
+- Con una versión de Ollama sin soporte para `Q1_0`: usar el build de llama.cpp de PrismML y ejecutar su `llama-server` en el puerto 8080 con el GGUF de Bonsai; luego configurar `LLM_BASE_URL=http://localhost:8080/v1` y `LLM_MODEL` con el nombre de modelo que informa el servidor.
 
-Los modelos de razonamiento (Qwen3, Bonsai) pueden emitir bloques `<think>…</think>`: se eliminan antes del ruteo y de la respuesta. `LLM_DISABLE_THINKING=true` (por defecto) además envía `chat_template_kwargs: {enable_thinking: false}`, que llama.cpp respeta y otros servidores ignoran. Si el servidor no está disponible, el chat y las evaluaciones fallan con un mensaje que menciona `LLM_BASE_URL` y `ollama serve`.
+Los modelos de razonamiento (Qwen3, Bonsai) pueden emitir bloques `<think>…</think>`: se eliminan antes del ruteo y de la respuesta. `LLM_DISABLE_THINKING=true` (por defecto) además le pide al servidor que no razone: envía `chat_template_kwargs: {enable_thinking: false}`, que respeta llama.cpp, y `reasoning_effort: "none"`, que respeta la API compatible con OpenAI de Ollama (sin este campo, Bonsai en Ollama razona en cada pedido: ~10 s contra ~0,6 s para un saludo). Cada servidor ignora el campo que no conoce. Si el servidor no está disponible, el chat y las evaluaciones fallan con un mensaje que menciona `LLM_BASE_URL` y `ollama serve`.
 
 Para usar Claude en su lugar: `LLM_PROVIDER=anthropic` más `ANTHROPIC_API_KEY` (opcionalmente `ANTHROPIC_MODEL`).
 

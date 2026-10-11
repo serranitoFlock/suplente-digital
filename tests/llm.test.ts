@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeLlmError, extractJson, resolveLlmSettings, stripThinking } from "../src/llm.js";
+import { describeLlmError, extractJson, resolveLlmSettings, stripThinking, thinkingRequestKwargs } from "../src/llm.js";
 
 describe("resolveLlmSettings", () => {
   it("defaults to the openai-compatible provider with local Ollama settings", () => {
@@ -115,5 +115,18 @@ describe("describeLlmError", () => {
 
   it("passes other errors through", () => {
     expect(describeLlmError(new Error("boom"), settings)).toBe("boom");
+  });
+});
+
+describe("thinkingRequestKwargs", () => {
+  it("asks both llama.cpp and Ollama to skip reasoning when thinking is disabled", () => {
+    expect(thinkingRequestKwargs(true)).toEqual({
+      chat_template_kwargs: { enable_thinking: false },
+      reasoning_effort: "none",
+    });
+  });
+
+  it("sends nothing extra when thinking is allowed", () => {
+    expect(thinkingRequestKwargs(false)).toBeUndefined();
   });
 });

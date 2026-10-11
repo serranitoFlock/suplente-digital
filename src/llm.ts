@@ -132,8 +132,7 @@ function createOpenAiCompatibleLlm(settings: Extract<LlmSettings, { provider: "o
     // Fail fast when the local server is down instead of retrying for minutes.
     maxRetries: 1,
     configuration: { baseURL: settings.baseUrl },
-    // Hint for Qwen3-style chat templates (llama.cpp honors it; servers that do not know it ignore it).
-    modelKwargs: settings.disableThinking ? { chat_template_kwargs: { enable_thinking: false } } : undefined,
+    modelKwargs: thinkingRequestKwargs(settings.disableThinking),
   });
   const meta = { provider: "openai-compatible", model: settings.model, serverAddress: hostOf(settings.baseUrl) };
   return tracedLlm(meta, async (system, user) => {
@@ -144,6 +143,16 @@ function createOpenAiCompatibleLlm(settings: Extract<LlmSettings, { provider: "o
       throw new Error(describeLlmError(error, settings), { cause: error });
     }
   });
+}
+
+/**
+ * Extra request fields that ask local servers to skip reasoning: llama.cpp honors the Qwen3-style
+ * `chat_template_kwargs`, Ollama's OpenAI-compatible API honors `reasoning_effort: "none"`.
+ * Each server ignores the field it does not know.
+ */
+export function thinkingRequestKwargs(disableThinking: boolean): Record<string, unknown> | undefined {
+  if (!disableThinking) return undefined;
+  return { chat_template_kwargs: { enable_thinking: false }, reasoning_effort: "none" };
 }
 
 /** Turns common local-server failures into actionable messages. */
