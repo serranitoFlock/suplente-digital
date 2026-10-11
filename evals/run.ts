@@ -15,7 +15,8 @@ import { Retriever, type VectorIndex } from "../src/rag/retriever.js";
 import { MockToolProvider } from "../src/tools/mock-provider.js";
 import { withScripts } from "../src/tools/script-provider.js";
 import { loadScriptRegistry } from "../src/tools/scripts.js";
-import { calledNoTool, countFacts, injectionResisted, mergeSummaries } from "./scoring.js";
+import { parseEvalArgs, selectCases } from "./options.js";
+import { calledNoTool, countFacts, injectionResisted, mergeSummaries, passRates, runChecks } from "./scoring.js";
 
 interface EvalCase {
   id: string;
@@ -87,9 +88,13 @@ async function evaluateRetrieval(cases: EvalCase[], embedder: LocalE5Embedder): 
   console.log(`Unanswerable cases above minScore ${minScore}: ${unknown.filter((u) => u.aboveMinScore).length}/${unknown.length} (${unknown.map((u) => `${u.id} ${u.topScore}`).join(", ")})`);
 }
 
+/** Usage and flags (`--retrieval-only`, `--only <id,...>`, `--repeat <N>`): see evals/options.ts. */
 async function main(): Promise<void> {
-  const retrievalOnly = process.argv.includes("--retrieval-only");
-  const cases = JSON.parse(await readFile(new URL("./questions.json", import.meta.url), "utf8")) as EvalCase[];
+  const { retrievalOnly, only, repeat } = parseEvalArgs(process.argv.slice(2));
+  const allCases = JSON.parse(await readFile(new URL("./questions.json", import.meta.url), "utf8")) as EvalCase[];
+  // Unknown ids fail here, before the index, the embedder or the model are loaded.
+  const cases = selectCases(allCases, only);
+  if (only) console.log(`Cases: ${cases.length}/${allCases.length} selected (${cases.map((c) => c.id).join(", ")})`);
   const index = JSON.parse(await readFile(config.indexPath, "utf8").catch(() => {
     throw new Error(`Index not found at ${config.indexPath}. Run \`npm run ingest\` first.`);
   })) as VectorIndex;
@@ -126,8 +131,9 @@ async function main(): Promise<void> {
   const caseSummaries: TraceSummary[] = [];
   const rows = [];
   try {
-    for (const testCase of cases) {
-      const threadId = `eval-${testCase.id}`;
+    // Each repetition is independent: fresh thread ids, setup turns replayed, escalations rejected again.
+    for (const testCase of cases) for (let run = 1; run <= repeat; run++) {
+      const threadId = repeat > 1 ? `eval-${testCase.id}-r${run}` : `eval-${testCase.id}`;
       // Setup turns of a multi-turn case build its history; they are excluded from the case stats.
       let history: ConversationTurn[] = testCase.history ?? [];
       for (const [i, prior] of (testCase.conversation ?? []).entries()) {
@@ -149,6 +155,7 @@ async function main(): Promise<void> {
       const saidNoSe = turn.state.outcome === "unknown";
       rows.push({
         id: testCase.id,
+        ...(repeat > 1 ? { run } : {}),
         expected: testCase.expectedRoute,
         got: turn.state.route,
         routeOk: turn.state.route === testCase.expectedRoute,
@@ -177,6 +184,20 @@ async function main(): Promise<void> {
   }
 
   console.table(rows.map(({ factRate: _factRate, ...row }) => row));
+  if (repeat > 1) {
+    // Per-case stability: a run passes when every check that applies to the case holds.
+    const rates = passRates(rows.map((row) => ({ id: row.id, checks: runChecks(row) })));
+    console.log(`\nPass rates over ${repeat} runs per case (run passes = all applicable checks true):`);
+    console.table(
+      rates.map((rate) => ({
+        id: rate.id,
+        pass: `${rate.passed}/${rate.runs}`,
+        ...Object.fromEntries(Object.entries(rate.checks).map(([name, check]) => [name, `${check.ok}/${check.runs}`])),
+      })),
+    );
+    for (const rate of rates) console.log(`${rate.id.padEnd(28)} ${rate.passed}/${rate.runs}`);
+    console.log(`Aggregate metrics below cover all ${rows.length} runs.`);
+  }
   const pct = (values: boolean[]) => (values.length ? `${Math.round((100 * values.filter(Boolean).length) / values.length)}%` : "n/a");
   const factRates = rows.flatMap((r) => (r.factRate === undefined ? [] : [r.factRate]));
   console.log(`Route accuracy:      ${pct(rows.map((r) => r.routeOk))}`);
