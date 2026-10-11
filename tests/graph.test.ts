@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ANSWER_PROMPT } from "../src/graph/answer.js";
+import { APPROVED_FALLBACK_REPLY } from "../src/graph/escalate.js";
 import { CAPABILITIES_MESSAGE } from "../src/graph/capabilities.js";
 import { DRAFT_PROMPT, REFUSAL_MESSAGE } from "../src/graph/escalate.js";
 import { askAgent, buildGraph, resumeAgent, type AgentGraph } from "../src/graph/graph.js";
@@ -54,6 +55,7 @@ interface Script {
   route: string;
   answer?: string;
   tool?: string;
+  draft?: string;
 }
 
 /** Fake model: answers each node's prompt from a per-test script, recording calls. */
@@ -77,7 +79,7 @@ function fakeLlm(script: Script, calls: string[]): Llm {
     }
     if (system === DRAFT_PROMPT) {
       calls.push("draft");
-      return "Borrador: no ejecutar; confirmar con la persona responsable.";
+      return script.draft ?? "Borrador: no ejecutar; confirmar con la persona responsable.";
     }
     throw new Error("unexpected prompt");
   };
@@ -214,6 +216,34 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
     expect(resumed.state.outcome).toBe("rejected");
     expect(resumed.state.answer).toContain("Esperar a la vuelta");
     expect(await pending.list()).toMatchObject([{ reason: "escalated", decision: "rejected" }]);
+  });
+
+  it("sends the requester only the proposed reply and the backup note when approved", async () => {
+    const draft = [
+      "**Resumen del pedido:** mergear el MR 482 a main.",
+      "**Riesgos identificados:** impacto en producción.",
+      "**Pasos sugeridos:** 1. Verificar el pipeline.",
+      "**Respuesta propuesta para el usuario:**",
+      '"Recibí tu pedido de mergear el MR 482. Lo revisa una persona del equipo."',
+    ].join("\n");
+    const graph = graphFor({ route: "sensitive", draft });
+    const first = await askAgent(graph, "mergeá el MR 482 a main", "t5b");
+    expect(first.review?.draft).toContain("Riesgos identificados");
+
+    const { state } = await resumeAgent(graph, { approved: true, note: "Lo mergeo yo hoy" }, "t5b");
+    expect(state.outcome).toBe("approved");
+    expect(state.answer).toContain("Recibí tu pedido de mergear el MR 482. Lo revisa una persona del equipo.");
+    expect(state.answer).toContain("Lo mergeo yo hoy");
+    expect(state.answer).not.toMatch(/Riesgos|Pasos sugeridos|Resumen del pedido|borrador/i);
+    expect(await pending.list()).toMatchObject([{ reason: "escalated", decision: "approved", draft }]);
+  });
+
+  it("falls back to a fixed reply, never the internal draft, when the draft has no proposed reply", async () => {
+    const graph = graphFor({ route: "sensitive", draft: "Riesgos: borra datos de producción. Pasos: hacer backup." });
+    await askAgent(graph, "Borrá la rama release/1.0", "t5c");
+    const { state } = await resumeAgent(graph, { approved: true }, "t5c");
+    expect(state.answer).toBe(APPROVED_FALLBACK_REPLY);
+    expect(state.answer).not.toContain("Riesgos");
   });
 
   it("forces escalation for irreversible requests even if the model routes them elsewhere", async () => {
