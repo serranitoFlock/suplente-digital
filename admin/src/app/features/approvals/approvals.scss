@@ -1,0 +1,58 @@
+.approvals__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.approvals__title {
+  margin: 0;
+  font: var(--mat-sys-headline-small);
+  outline: none;
+}
+
+.approvals__count {
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.approvals__message {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--mat-sys-on-surface-variant);
+
+  &--error {
+    color: var(--mat-sys-error);
+  }
+}
+
+.approvals__list {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.job__label {
+  margin: 12px 0 4px;
+  font: var(--mat-sys-title-small);
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.job__text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.job__draft {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--mat-sys-surface-container-high);
+}
+
+.job__reject {
+  color: var(--mat-sys-error);
+}

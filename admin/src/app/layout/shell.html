@@ -1,0 +1,31 @@
+<a class="skip-link" href="#contenido">Saltar al contenido</a>
+<mat-toolbar class="shell__bar" role="banner">
+  <span class="shell__brand">Suplente digital — Panel</span>
+  <nav class="shell__nav" aria-label="Secciones">
+    <a
+      mat-button
+      routerLink="/aprobaciones"
+      routerLinkActive="shell__link--active"
+      ariaCurrentWhenActive="page"
+    >
+      Aprobaciones
+    </a>
+    <span matTooltip="Próximamente">
+      <button mat-button type="button" disabled>Historial</button>
+    </span>
+    <span matTooltip="Próximamente">
+      <button mat-button type="button" disabled>Sin responder</button>
+    </span>
+  </nav>
+  <span class="shell__spacer"></span>
+  <span class="shell__live" [class]="'shell__live--' + liveStatus()" role="status">
+    <span class="shell__dot" aria-hidden="true"></span>{{ liveLabel() }}
+  </span>
+  <button mat-stroked-button type="button" (click)="logout()">
+    <mat-icon aria-hidden="true">logout</mat-icon>
+    Cerrar sesión
+  </button>
+</mat-toolbar>
+<main id="contenido" class="shell__content" tabindex="-1">
+  <router-outlet />
+</main>

@@ -170,7 +170,7 @@ Otros scripts:
 | `npm test` | Tests unitarios (sin red: LLM falso y embeddings falsos; el runtime de embeddings nunca se carga) |
 | `npm run typecheck` | `tsc --noEmit` |
 
-CI (`.github/workflows/ci.yml`) ejecuta `npm ci --ignore-scripts`, `npm run typecheck` y `npm test` en Node 22.13 y 24 en cada push y pull request. No hace llamadas a LLM ni usa secretos; los scripts de instalación de dependencias se omiten porque los tests nunca cargan el runtime nativo de embeddings (`@huggingface/transformers` se importa de forma diferida).
+CI (`.github/workflows/ci.yml`) ejecuta `npm ci --ignore-scripts`, `npm run typecheck` y `npm test` en Node 22.13 y 24 en cada push y pull request. Un segundo job compila y testea el [panel de administración](#panel-de-administración) (`admin/`) en Node 24. No hace llamadas a LLM ni usa secretos; los scripts de instalación de dependencias se omiten porque los tests nunca cargan el runtime nativo de embeddings (`@huggingface/transformers` se importa de forma diferida).
 
 Ejemplo de sesión:
 
@@ -279,6 +279,10 @@ curl -N "$API/v1/events?requester=ana" -H "Authorization: Bearer $CLIENT"
 | `failed` | `id`, `requester`, `question`, `message` amigable | `error` técnico |
 
 Con el token de admin, `GET /v1/events` recibe los eventos de todos (o de uno, con `?requester=`). Cada pedido escribe una línea en stderr (método, ruta, estado, ms), sin tokens ni query string. `Ctrl+C` / `SIGTERM` deja de aceptar pedidos, espera las consultas en curso y cierra todo.
+
+## Panel de administración
+
+`admin/` es un panel web (Angular 22 + Angular Material) para el suplente humano, sobre la [API HTTP](#api-http) con el token de administración. Por ahora cubre la cola de aprobaciones en vivo: pregunta, solicitante y borrador a la vista; aprobar o rechazar con una nota opcional. Se corre con `npm run serve` en la raíz y `npm start` en `admin/` (el servidor de desarrollo reenvía `/v1` a la API). El token se guarda solo en `sessionStorage` de la pestaña. Ver [`admin/README.md`](admin/README.md).
 
 ## Citas y fuentes
 

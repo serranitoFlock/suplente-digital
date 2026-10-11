@@ -1,0 +1,32 @@
+.login {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.login__card {
+  width: min(100%, 440px);
+}
+
+.login__title {
+  margin: 0;
+  font: var(--mat-sys-title-large);
+}
+
+.login__field {
+  width: 100%;
+}
+
+.login__help {
+  margin: 0 0 8px;
+  font: var(--mat-sys-body-small);
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.login__error {
+  min-height: 1.5em;
+  margin-bottom: 8px;
+  color: var(--mat-sys-error);
+}

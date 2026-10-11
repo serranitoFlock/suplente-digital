@@ -29,3 +29,23 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm test
+
+  admin:
+    name: admin panel build + tests (Node 24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      # Same supply-chain hardening as the root job; the Angular toolchain works without install scripts.
+      - run: npm ci --ignore-scripts
+      # Vitest + jsdom in Node (the Angular 22 default): no browser or system packages needed.
+      - run: npx ng test --watch=false
+      - run: npx ng build

@@ -1,0 +1,78 @@
+<header class="approvals__header">
+  <h1 #heading tabindex="-1" class="approvals__title">
+    Aprobaciones
+    @if (pending.hasValue()) {
+      <span class="approvals__count">({{ jobs().length }})</span>
+    }
+  </h1>
+  <button mat-stroked-button type="button" (click)="reload()" [disabled]="pending.isLoading()">
+    <mat-icon aria-hidden="true">refresh</mat-icon>
+    Actualizar
+  </button>
+</header>
+
+@if (pending.isLoading()) {
+  <mat-progress-bar mode="indeterminate" aria-label="Cargando pedidos" />
+}
+
+@if (pending.error()) {
+  <div class="approvals__message approvals__message--error" role="alert">
+    <p>No se pudieron cargar los pedidos.</p>
+    <button mat-button type="button" (click)="reload()">Reintentar</button>
+  </div>
+} @else if (pending.hasValue()) {
+  @if (jobs().length === 0) {
+    <p class="approvals__message" role="status">No hay pedidos esperando aprobación</p>
+  } @else {
+    <ul class="approvals__list" aria-label="Pedidos esperando aprobación">
+      @for (job of jobs(); track job.id) {
+        <li>
+          <mat-card
+            appearance="outlined"
+            class="job"
+            [attr.aria-labelledby]="'job-' + job.id + '-title'"
+          >
+            <mat-card-header>
+              <mat-card-title [id]="'job-' + job.id + '-title'">
+                Pedido #{{ job.id }} · {{ job.requester ?? 'sin solicitante' }}
+              </mat-card-title>
+              <mat-card-subtitle>
+                <time [attr.datetime]="job.createdAt">{{
+                  job.createdAt | date: 'dd/MM/yyyy HH:mm'
+                }}</time>
+              </mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content>
+              <h2 class="job__label">Pregunta</h2>
+              <p class="job__text">{{ job.question }}</p>
+              <h2 class="job__label">Borrador de respuesta</h2>
+              <!-- Model-written text: rendered as plain text only, never as HTML. -->
+              <p class="job__text job__draft">{{ job.draft ?? '(sin borrador)' }}</p>
+            </mat-card-content>
+            <mat-card-actions align="end">
+              <button
+                mat-button
+                type="button"
+                class="job__reject"
+                [disabled]="busy().has(job.id)"
+                (click)="decide(job, 'reject')"
+                [attr.aria-label]="'Rechazar el pedido #' + job.id"
+              >
+                Rechazar
+              </button>
+              <button
+                mat-flat-button
+                type="button"
+                [disabled]="busy().has(job.id)"
+                (click)="decide(job, 'approve')"
+                [attr.aria-label]="'Aprobar el pedido #' + job.id"
+              >
+                Aprobar
+              </button>
+            </mat-card-actions>
+          </mat-card>
+        </li>
+      }
+    </ul>
+  }
+}

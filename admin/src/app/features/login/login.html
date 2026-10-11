@@ -1,0 +1,38 @@
+<main class="login">
+  <mat-card appearance="outlined" class="login__card">
+    <mat-card-header>
+      <mat-card-title><h1 class="login__title">Suplente digital — Panel</h1></mat-card-title>
+      <mat-card-subtitle
+        >Ingrese con el token de administración
+        (<code>ASSISTANT_ADMIN_TOKEN</code>).</mat-card-subtitle
+      >
+    </mat-card-header>
+    <mat-card-content>
+      <form novalidate (submit)="onSubmit($event)" aria-describedby="login-help">
+        <mat-form-field appearance="outline" class="login__field">
+          <mat-label>Token de administración</mat-label>
+          <input
+            matInput
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            [formField]="loginForm.token"
+          />
+          @if (loginForm.token().touched() && loginForm.token().invalid()) {
+            <mat-error>{{ loginForm.token().errors()[0]?.message }}</mat-error>
+          }
+        </mat-form-field>
+        <p id="login-help" class="login__help">
+          El token queda guardado solo en esta pestaña y se borra al cerrarla.
+        </p>
+        <div class="login__error" role="alert" aria-live="assertive">{{ error() }}</div>
+        <button mat-flat-button type="submit" [disabled]="busy()">
+          @if (busy()) {
+            <mat-progress-spinner mode="indeterminate" diameter="18" aria-label="Verificando" />
+          }
+          Ingresar
+        </button>
+      </form>
+    </mat-card-content>
+  </mat-card>
+</main>

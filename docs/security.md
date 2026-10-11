@@ -130,6 +130,16 @@ What remains open:
 - **No rate limiting or token rotation.** A leaked client token lets someone queue work (and spend model time) until it is changed and the server restarted.
 - **Single process per database.** Running the CLI and the server on the same `ASSISTANT_DB_PATH` at once breaks the single-owner assumption of the job queue and recovery.
 
+## Admin panel (`admin/`)
+
+The Angular panel (T20, [`admin/README.md`](../admin/README.md)) is a client of the admin scope above; it adds no API capability.
+
+- **Token storage.** The owner pastes the admin token on the login page. It is checked against an admin-only endpoint (`GET /v1/jobs?status=needs_approval`: 401 → invalid, 403 → the client token is refused) and then kept in `sessionStorage` only: per tab, cleared when the tab closes, never in `localStorage` or cookies. A functional HTTP interceptor adds it only to same-origin `/v1/` calls; any 401 clears it and returns to the login page; "Cerrar sesión" clears it too.
+- **XSS impact and drafts.** Script running in the panel's origin could read the token from `sessionStorage`, so the panel must never execute content. Escalation drafts, questions and answers are model- or requester-written text: they are rendered only through Angular text interpolation (`white-space: pre-wrap`), never `innerHTML` or `bypassSecurityTrust*`. A test renders a draft containing `<img onerror>` and checks that no element is created.
+- **Live events.** `EventSource` cannot send an `Authorization` header, so `/v1/events` is read with `fetch` + `ReadableStream` and the bearer header; the token is never put in a URL.
+- **Serving.** For now the panel only talks to the API through the Angular dev-server proxy (`admin/proxy.conf.json`: `/v1`, `/health` → `127.0.0.1:8787`), so the API needs no CORS. Production serving (static build behind the same reverse proxy with TLS, plus a Content-Security-Policy) is a later task. The page loads the Roboto and Material Symbols fonts from Google Fonts (stylesheets only; they cannot read the token).
+- **Shared identity.** Everyone with the admin token is "the human backup"; per-human login is still open (see above).
+
 ## Residual risks
 
 - **Prompt-level defenses are probabilistic.** A different phrasing can still make the model follow an injected instruction inside the answer text (e.g. answer something wrong, or say the canary). The output guard catches links and token formats, not arbitrary wording. Mitigation in practice: keep `knowledge/` under code review like any other code.
