@@ -23,12 +23,17 @@ const decisionSchema = z.object({
  *
  * - Refusal patterns (secrets, the system prompt, attempts to override the instructions) are
  *   refused immediately with a fixed reply: there is nothing a human could approve.
- * - Action patterns (delete, deploy to production, merge, permissions, force push, ticket changes)
+ * - Action patterns (delete, deploy to production, merge, permissions, force push, ticket changes,
+ *   retrying/cancelling/triggering CI, running a deploy or a script whose name says it writes)
  *   go to human approval. They are skipped when the message is framed as a how-to question
  *   ("¿Cómo despliego…?") and contains no imperative: explaining a procedure from the docs is safe,
  *   doing it is not. Refusal patterns never get that exemption.
  */
 const WORD_END = String.raw`(?!\p{L})`;
+/** Imperatives that ask the bot to run something ("ejecutá", "corré", "lanzá"). */
+const RUN_VERB = String.raw`(?<!\p{L})(ejecut(á|ar|alo|ala)|corr(é|er|elo|ela)|córr(elo|ela)|lanz(á|ar|alo)|dispar(á|ar|alo)|inici(á|ar)|arranc(á|ar)|hacé|run)(?!\p{L})`;
+/** Name fragments that mark a script as a write operation (retry-job.sh, cancel_pipeline, borrar-tag). */
+const SCRIPT_WRITE_WORD = String.raw`(retry|rerun|re-run|cancel|trigger|deploy|delete|remove|rollback|restart|purge|reintent|relanz|borr|elimin)`;
 const ACTION_PATTERNS = [
   new RegExp(String.raw`\b(borr(ar|á|a|alo|ala|en)|elimin(ar|á|a|alo|en)|delete|drop)${WORD_END}`, "iu"),
   /\b(deploy|despleg|desplieg)\p{L}*.*\bproducci[oó]n/iu,
@@ -38,6 +43,14 @@ const ACTION_PATTERNS = [
   /\bforce[- ]?push/iu,
   // Ticket mutations: the catalog has no write tools, so a request to change a ticket goes to a human.
   /(?<!\p{L})(cerr(á|ar|alo|ala)|reasign\p{L}*|asign(á|ar|ame|amelo|alo|ala)|transicion(á|ar|alo))(?!\p{L}).*\b(ticket|[A-Z][A-Z0-9]+-\d+)/iu,
+  // CI mutations: retry, re-run, cancel or trigger pipelines and jobs (deleting is covered above).
+  /(?<!\p{L})(reintent|relanz|cancel|reejecut|re-ejecut|dispar|lanz)(á|ar|alo|ala|alos|en|ame)(?!\p{L}).*\b(jobs?|pipelines?|builds?|stages?)\b/iu,
+  /(?<!\p{L})volv(é|er|e) a (correr|ejecutar|lanzar|disparar|intentar)(?!\p{L}).*\b(jobs?|pipelines?|builds?|stages?)\b/iu,
+  /^\s*(please\s+)?(retry|re-?run|cancel|trigger|restart)\b.*\b(jobs?|pipelines?|builds?)\b/iu,
+  // Running a deploy, or a script whose name says it writes ("corré retry-job.sh"). Registered
+  // read-only scripts ("corré el script failed-jobs") are not flagged.
+  new RegExp(String.raw`${RUN_VERB}.*\b(deploy|despliegue|release)\b`, "iu"),
+  new RegExp(String.raw`${RUN_VERB}.*(script\s+[\w./-]*${SCRIPT_WRITE_WORD}|[\w./-]*${SCRIPT_WRITE_WORD}[\w-]*\.(sh|bash|py|js|mjs|ts|rb)\b)`, "iu"),
 ];
 const SECRET_PATTERNS = [
   /\b(token|contraseñ|password|credencial|secret)\p{L}*/iu,
@@ -57,7 +70,7 @@ const HOW_TO_FRAMING =
 
 /** Voseo / clitic imperatives that turn a message into an order ("borrala", "mergealo", "desplegá", "pasame"). */
 const IMPERATIVE =
-  /(?<!\p{L})(borr[aá]|elimin[aá]|merge[aá]|despleg[aá]|revoc[aá]|otorg[aá]|aprob[aá]|hac[eé]|pas[aá]|d[aá]|mostr[aá])(me|lo|la|los|las|le)(?!\p{L})|(?<!\p{L})(borrá|eliminá|mergeá|desplegá|revocá|otorgá|aprobá|hacé|pasá|mostrá)(?!\p{L})/iu;
+  /(?<!\p{L})(borr[aá]|elimin[aá]|merge[aá]|despleg[aá]|revoc[aá]|otorg[aá]|aprob[aá]|hac[eé]|pas[aá]|d[aá]|mostr[aá]|reintent[aá]|relanz[aá]|cancel[aá]|ejecut[aá])(me|lo|la|los|las|le)(?!\p{L})|(?<!\p{L})(borrá|eliminá|mergeá|desplegá|revocá|otorgá|aprobá|hacé|pasá|mostrá|reintentá|relanzá|cancelá|ejecutá|corré|lanzá|dispará)(?!\p{L})/iu;
 
 export function isHowToQuestion(question: string): boolean {
   return HOW_TO_FRAMING.test(question) && !IMPERATIVE.test(question);

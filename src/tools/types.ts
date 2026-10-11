@@ -106,6 +106,8 @@ export function isAutoRunnable(tool: CatalogToolName, policies: Record<CatalogTo
 /** What the task node needs to offer `run_script` and validate a call (implemented by `ScriptRegistry`). */
 export interface ScriptCatalog {
   readonly size: number;
+  /** Registered script ids. */
+  ids(): string[];
   /** One model-facing line per registered script: id, description and params. */
   describe(): string[];
   /** The call with validated args (defaults applied), or null for an unknown id or invalid args. */
@@ -121,10 +123,18 @@ export interface ToolProvider {
   close?(): Promise<void>;
 }
 
-/** Parses the model's tool choice; returns null for "none", unknown tools or invalid arguments. */
-export function parseToolCall(text: string): ToolCall | null {
+/**
+ * Parses the model's tool choice; returns null for "none", unknown tools or invalid arguments.
+ * Small models often name a registered script as the tool (`{"tool": "failed-jobs", "args": {...}}`):
+ * when `scriptIds` lists that id (and it is not a catalog tool), the choice is read as a `run_script`
+ * call. The caller still validates the id and args against the registry before anything runs.
+ */
+export function parseToolCall(text: string, scriptIds: ReadonlySet<string> = new Set()): ToolCall | null {
   const raw = z.object({ tool: z.string(), args: z.record(z.string(), z.unknown()).default({}) }).safeParse(extractJson(text));
   if (!raw.success) return null;
+  if (!Object.hasOwn(toolArgSchemas, raw.data.tool) && raw.data.tool !== SCRIPT_TOOL && scriptIds.has(raw.data.tool)) {
+    raw.data = { tool: SCRIPT_TOOL, args: { script: raw.data.tool, args: raw.data.args } };
+  }
   if (raw.data.tool === SCRIPT_TOOL) {
     const args = scriptToolArgSchema.safeParse(raw.data.args);
     return args.success ? { tool: SCRIPT_TOOL, args: args.data } : null;

@@ -7,7 +7,7 @@ import { CAPABILITIES_MESSAGE } from "../src/graph/capabilities.js";
 import { DRAFT_PROMPT, REFUSAL_MESSAGE } from "../src/graph/escalate.js";
 import { askAgent, buildGraph, resumeAgent, type AgentGraph } from "../src/graph/graph.js";
 import { ROUTER_PROMPT } from "../src/graph/router.js";
-import { TOOL_SELECTION_PROMPT, TOOL_SUMMARY_PROMPT, toolSelectionPrompt } from "../src/graph/task.js";
+import { SCRIPT_FAILURE_MESSAGE, TOOL_FAILURE_MESSAGE, TOOL_SELECTION_PROMPT, TOOL_SUMMARY_PROMPT, toolSelectionPrompt } from "../src/graph/task.js";
 import type { Llm } from "../src/llm.js";
 import { PendingStore } from "../src/pending/store.js";
 import { buildIndexFromDocs } from "../src/rag/ingest.js";
@@ -377,7 +377,12 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
       expect(state.answer).toContain("Fallaron jobs en acme-ui-kit.");
       expect(state.answer).toContain("script failed-jobs");
       expect(state.toolCalls).toMatchObject([
-        { tool: "run_script", args: { script: "failed-jobs", args: { days: 3, project: "todos" } }, readOnly: true, result: [{ project: "acme-ui-kit" }, { project: "acme-card-elements" }] },
+        { tool: "run_script", args: { script: "failed-jobs", args: { days: 3, project: "todos" } }, readOnly: true, result: [
+          { project: "acme-ui-kit", id: 4521 },
+          { project: "acme-ui-kit", id: 4533 },
+          { project: "acme-card-elements", id: 4502 },
+          { project: "acme-shell", id: 4540 },
+        ] },
       ]);
     });
 
@@ -391,7 +396,8 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
         executed = true;
         return "[]";
       });
-      const { state } = await askAgent(graph, "reintentá el job 1", "s2");
+      // A read phrasing: write phrasings ("reintentá el job 1") never reach tool selection (see detectSensitive).
+      const { state } = await askAgent(graph, "¿qué jobs fallaron? usá el script que haga falta", "s2");
       expect(executed).toBe(false);
       expect(state.outcome).toBe("unknown");
       expect(seen.some((s) => s.startsWith("summary:"))).toBe(false);
@@ -408,10 +414,14 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
     it("answers safely when the script fails", async () => {
       const seen: string[] = [];
       const graph = await scriptGraph('{"tool":"run_script","args":{"script":"failed-jobs","args":{}}}', seen, async () => {
-        throw new ToolCallError("run_script", "script_error");
+        throw new ToolCallError("run_script", "script_error", "exit 2: curl: (6) Could not resolve host gitlab.internal.example.com");
       });
       const { state } = await askAgent(graph, "jobs fallidos", "s4");
-      expect(state.answer).toMatch(/No pude completar la consulta de solo lectura/);
+      // Script-specific wording: no "external system", and no exit codes, stderr or hosts.
+      expect(state.answer).toBe(SCRIPT_FAILURE_MESSAGE);
+      expect(state.answer).not.toBe(TOOL_FAILURE_MESSAGE);
+      expect(state.answer).toMatch(/script de consulta/);
+      expect(state.answer).not.toMatch(/sistema externo|exit|curl|gitlab|failed-jobs/i);
       expect(await pending.list()).toMatchObject([{ reason: "tool_failure" }]);
     });
   });

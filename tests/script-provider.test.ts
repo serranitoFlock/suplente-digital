@@ -41,7 +41,7 @@ describe("script runner", () => {
     expect(jobs.length).toBeGreaterThan(0);
     expect(jobs.every((job: { daysAgo: number }) => job.daysAgo <= 3)).toBe(true);
     const one = JSON.parse(await provider.call({ tool: "run_script", args: { script: "failed-jobs", args: { days: 30, project: "acme-shell" } } }));
-    expect(one.map((job: { project: string }) => job.project)).toEqual(["acme-shell"]);
+    expect(one.map((job: { project: string; id: number }) => `${job.project}#${job.id}`)).toEqual(["acme-shell#4540", "acme-shell#4488"]);
   });
 
   it("sends every other tool to the wrapped provider", async () => {

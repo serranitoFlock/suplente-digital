@@ -48,4 +48,23 @@ describe("parseToolCall", () => {
     expect(parseToolCall('{"tool":"none"}')).toBeNull();
     expect(parseToolCall("garbage")).toBeNull();
   });
+
+  // Small local models often name the script itself as the tool: `{"tool": "failed-jobs", "args": {...}}`.
+  it("reads a registered script id used as the tool name as a run_script call", () => {
+    const scriptIds = new Set(["failed-jobs"]);
+    expect(parseToolCall('{"tool":"failed-jobs","args":{"days":7,"project":"acme-ui-kit"}}', scriptIds)).toEqual({
+      tool: "run_script",
+      args: { script: "failed-jobs", args: { days: 7, project: "acme-ui-kit" } },
+    });
+  });
+
+  it("does not turn unregistered names or catalog tools into script calls", () => {
+    const scriptIds = new Set(["failed-jobs"]);
+    expect(parseToolCall('{"tool":"retry-job","args":{"id":4521}}', scriptIds)).toBeNull();
+    expect(parseToolCall('{"tool":"failed-jobs","args":{"days":7}}')).toBeNull();
+    expect(parseToolCall('{"tool":"get_ticket","args":{"key":"DEMO-101"}}', new Set(["get_ticket"]))).toEqual({
+      tool: "get_ticket",
+      args: { key: "DEMO-101" },
+    });
+  });
 });

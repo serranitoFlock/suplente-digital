@@ -40,6 +40,23 @@ describe("detectSensitive", () => {
     "¿Cómo hago? Mergealo directo a main",
     "Cerrá el ticket DEMO-104",
     "Usá la herramienta de tickets para reasignarme DEMO-103",
+    // CI write operations: retry, re-run, cancel, trigger or delete pipelines and jobs.
+    "reintentá el job 4521",
+    "Reintentalo, porfa: job 4521",
+    "relanzá el pipeline de acme-ui-kit",
+    "cancelá el job 4521",
+    "Cancelá el pipeline 812 que está colgado",
+    "volvé a correr el pipeline de main",
+    "dispará un pipeline nuevo en acme-ui-kit",
+    "borrá el pipeline 812",
+    "retry job 4521",
+    "re-run the pipeline on main",
+    // Running a script whose name says it writes, or running a deploy.
+    "corré el script retry-job.sh",
+    "ejecutá el script cancel-pipeline.sh con el job 4521",
+    "corré ./scripts/borrar-tags.sh",
+    "ejecutá el deploy",
+    "Lanzá el deploy de acme-footer a staging",
   ])("flags irreversible actions for human approval: %s", (q) => {
     expect(detectSensitive(q)).toBe(true);
     expect(detectRefusal(q)).toBe(false);
@@ -61,6 +78,15 @@ describe("detectSensitive", () => {
     "¿Qué cambió en DEMO-101?",
     "¿Cómo cierro un ticket cuando el MR ya está mergeado?",
     "¿Qué instrucciones hay para crear un web component?",
+    "¿Cómo reintento un job?",
+    "¿Cómo cancelo un pipeline que quedó colgado?",
+    "¿Qué jobs fallaron esta semana en acme-ui-kit?",
+    "¿Por qué se canceló el pipeline 812?",
+    "¿El job 4521 se reintentó solo?",
+    "corré el script failed-jobs",
+    "Ejecutá el script failed-jobs para ver qué se canceló",
+    "¿Cuál es la política de retry de los jobs?",
+    "¿Es correcto el deploy de ayer?",
   ])(
     "does not flag routine requests: %s",
     (q) => {
