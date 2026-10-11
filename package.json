@@ -5,7 +5,7 @@
   "description": "Digital backup agent that covers routine questions and read-only tasks while a person or team is away.",
   "type": "module",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
@@ -22,6 +22,7 @@
     "@langchain/anthropic": "1.5.12",
     "@langchain/core": "1.2.17",
     "@langchain/langgraph": "1.4.21",
+    "@langchain/langgraph-checkpoint": "1.1.6",
     "@langchain/openai": "1.6.2",
     "@modelcontextprotocol/sdk": "1.32.1",
     "dotenv": "18.0.6",

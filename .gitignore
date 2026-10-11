@@ -6,6 +6,10 @@ dist/
 data/*.json
 data/*.jsonl
 data/logs/
+# SQLite database (ASSISTANT_DB_PATH) and its WAL/shared-memory files
+data/*.db
+data/*.db-wal
+data/*.db-shm
 .cache/
 models/
 *.onnx

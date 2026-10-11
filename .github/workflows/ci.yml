@@ -15,8 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Lowest version allowed by package.json "engines" (vitest 5 needs ^22.12) and the current LTS.
-        node: ["22.12", "24"]
+        # Lowest version allowed by package.json "engines" (node:sqlite is unflagged from 22.13) and the current LTS.
+        node: ["22.13", "24"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

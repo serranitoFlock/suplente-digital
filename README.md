@@ -41,7 +41,7 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 
 1. Reemplazar `knowledge/` por los runbooks y FAQs reales de la persona y ejecutar `npm run ingest`; reescribir `evals/questions.json` con preguntas reales (y `expectedSources`) para medirlo.
 2. Conectar los servidores MCP reales (Jira / GitLab) con una credencial de **solo lectura**: `MCP_SERVER_COMMAND` + un archivo de mapeo (`MCP_TOOLS_CONFIG`) con los nombres y argumentos de cada servidor. El mapeo, el timeout y las fallas ya están probados contra un servidor MCP falso local; falta ejecutarlo contra los servidores reales, que solo son accesibles por VPN. Registrar los scripts de consulta del equipo (por ejemplo, monitores de pipelines) en `SCRIPTS_CONFIG` (ver [Integraciones de solo lectura](#integraciones-de-solo-lectura)).
-3. Agregar un adaptador para Teams (o Slack) sobre los eventos de `AssistantService` (ver [Acuse de recibo inmediato](#acuse-de-recibo-inmediato)) y una cola/checkpointer persistente.
+3. Agregar un adaptador para Teams (o Slack) sobre los eventos de `AssistantService` (ver [Acuse de recibo inmediato](#acuse-de-recibo-inmediato)); la cola, el checkpointer y la memoria ya persisten en SQLite (ver [Persistencia y reinicios](#persistencia-y-reinicios)).
 4. Enviar `data/traces.jsonl` al stack de observabilidad del equipo mediante un `TraceExporter` (OTel / Langfuse).
 
 **Limitaciones.**
@@ -49,7 +49,7 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 - La estimación anterior es ilustrativa; la tasa real de resolución depende de qué tan buenos y actualizados estén los documentos. El conjunto de evaluación (30 casos) mide la calidad de las respuestas, no la adopción.
 - Solo cubre las preguntas que los documentos responden, tres consultas de solo lectura y los scripts de consulta que una persona registre; cualquier otra cosa se convierte en un pendiente, no en una respuesta.
 - El modelo local por defecto (Gemma 4 12B) tarda ~11 s por pedido (p50 en el conjunto de evaluación; p95 ~26 s); eso es aceptable con acuse de recibo inmediato, pero no para un intercambio conversacional ágil.
-- Por ahora solo CLI: sin autenticación, sin permisos por usuario, cola en memoria.
+- Por ahora solo CLI: sin autenticación ni permisos por usuario. El estado persiste en un único archivo SQLite pensado para un solo proceso, y los trabajos y checkpoints viejos todavía no se depuran.
 
 ## Mapa de la rúbrica
 
@@ -133,8 +133,8 @@ flowchart LR
 
 | Pieza | Dónde | Notas |
 |-------|-------|-------|
-| Servicio | `src/service/*` | `submit()` → acuse inmediato y determinístico; cola en proceso (`ASSISTANT_CONCURRENCY`, por defecto 1); eventos tipados; `approve` / `reject` / `status` / `list` |
-| Orquestador | `src/graph/graph.ts` | `StateGraph` + checkpointer `MemorySaver` |
+| Servicio | `src/service/*` | `submit()` → acuse inmediato y determinístico; cola en proceso (`ASSISTANT_CONCURRENCY`, por defecto 1) con los trabajos guardados en SQLite; eventos tipados; `approve` / `reject` / `status` / `list` / `recover` |
+| Orquestador | `src/graph/graph.ts` | `StateGraph` + checkpointer SQLite (`src/persistence/sqlite-checkpointer.ts`; `MemorySaver` en los tests) |
 | Router | `src/graph/router.ts` | Clasificación JSON validada con zod + reglas determinísticas (`detectRefusal`, `detectSensitive`) |
 | RAG | `src/rag/*`, `src/graph/answer.ts` | Chunking según encabezados con un encabezado contextual (título del documento + ruta de encabezados) por chunk, `Xenova/multilingual-e5-small` mediante `@huggingface/transformers` (sin API key), similitud coseno sobre `data/index.json` |
 | Herramientas | `src/tools/*`, `src/graph/task.ts` | Interfaz `ToolProvider`; mock por defecto, cliente MCP cuando está configurado |
@@ -147,7 +147,7 @@ La especificación completa está en [`docs/spec.md`](docs/spec.md) (en inglés)
 
 ## Inicio rápido
 
-Requisitos: Node.js ≥ 22.12 (exigido por Vitest 5) y un LLM para el chat y las evaluaciones: un modelo local detrás de un servidor compatible con OpenAI (por defecto, sin API key) o una API key de Anthropic.
+Requisitos: Node.js ≥ 22.13 (primera versión con `node:sqlite` sin flag; Vitest 5 pide ≥ 22.12) y un LLM para el chat y las evaluaciones: un modelo local detrás de un servidor compatible con OpenAI (por defecto, sin API key) o una API key de Anthropic.
 
 ```bash
 npm install
@@ -168,7 +168,7 @@ Otros scripts:
 | `npm test` | Tests unitarios (sin red: LLM falso y embeddings falsos; el runtime de embeddings nunca se carga) |
 | `npm run typecheck` | `tsc --noEmit` |
 
-CI (`.github/workflows/ci.yml`) ejecuta `npm ci --ignore-scripts`, `npm run typecheck` y `npm test` en Node 22.12 y 24 en cada push y pull request. No hace llamadas a LLM ni usa secretos; los scripts de instalación de dependencias se omiten porque los tests nunca cargan el runtime nativo de embeddings (`@huggingface/transformers` se importa de forma diferida).
+CI (`.github/workflows/ci.yml`) ejecuta `npm ci --ignore-scripts`, `npm run typecheck` y `npm test` en Node 22.13 y 24 en cada push y pull request. No hace llamadas a LLM ni usa secretos; los scripts de instalación de dependencias se omiten porque los tests nunca cargan el runtime nativo de embeddings (`@huggingface/transformers` se importa de forma diferida).
 
 Ejemplo de sesión:
 
@@ -212,9 +212,9 @@ Un adaptador para Teams (o Slack) se conectaría así:
 2. Suscribirse a `done` / `failed` y enviar el resultado como **mensaje proactivo** a esa referencia de conversación guardada.
 3. Enviar `needs_approval` al canal del suplente como una adaptive card; sus botones llaman a `approve(id, note)` / `reject(id, note)`. El bot sigue sin ejecutar nunca la acción.
 
-Para producción, reemplazar la cola en proceso y `MemorySaver` por implementaciones persistentes (ver T3 en la lista de tareas) para que los trabajos sobrevivan a los reinicios.
+Los trabajos, las decisiones y los checkpoints del grafo se guardan en disco, así que sobreviven a un reinicio (ver [Persistencia y reinicios](#persistencia-y-reinicios)).
 
-Comandos de la CLI: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/stats`, `/log`, `/ayuda`, `/salir`. Los resultados se imprimen etiquetados con su número y el prompt se vuelve a dibujar, de modo que se puede seguir escribiendo mientras se procesan las preguntas anteriores. Con `/salir` o al terminar la entrada, la CLI espera a que finalicen los trabajos en curso; los trabajos que siguen esperando aprobación se informan y no se ejecuta nada.
+Comandos de la CLI: `/aprobar <n> [nota]`, `/rechazar <n> [nota]`, `/estado`, `/pendientes`, `/stats`, `/log`, `/ayuda`, `/salir`. Los resultados se imprimen etiquetados con su número y el prompt se vuelve a dibujar, de modo que se puede seguir escribiendo mientras se procesan las preguntas anteriores. Con `/salir` o al terminar la entrada, la CLI espera a que finalicen los trabajos en curso; los trabajos que siguen esperando aprobación se informan, no se ejecuta nada y quedan guardados para la próxima sesión.
 
 ## Citas y fuentes
 
@@ -246,9 +246,27 @@ npm run ingest            # knowledge/*.md + filtered Engram notes → data/inde
 
 Las preguntas sobre el propio asistente ("¿qué podés hacer?", "¿cómo funcionás?", "¿quién sos?", "ayuda") reciben una descripción fija (ruta `capabilities`, sin RAG ni llamada al modelo): qué puede hacer (responder con la documentación indicando las fuentes, consultas de solo lectura de tickets y pipelines, derivar acciones al backup humano, registrar lo que no sabe), qué no puede hacer y los comandos de la CLI.
 
+## Persistencia y reinicios
+
+El estado del asistente vive en un único archivo SQLite (`ASSISTANT_DB_PATH`, por defecto `data/assistant.db`, ignorado por git junto con sus archivos `-wal` / `-shm`). Usa el módulo `node:sqlite` que trae Node (≥ 22.13), así que no hay dependencias nativas que compilar. Ahí se guardan los checkpoints del grafo de LangGraph, los trabajos (con su número, que sigue creciendo entre sesiones) y la memoria de conversación de cada solicitante.
+
+Al arrancar, la CLI recupera lo que quedó de la sesión anterior y lo informa en una línea (solo si hay algo):
+
+| Estado al cerrar | Qué pasa al reiniciar |
+|------------------|-----------------------|
+| Esperando aprobación | Sigue esperando; se aprueba o rechaza como siempre (`/estado`, `/pendientes`, `/aprobar <n>`, `/rechazar <n>`) y se reanuda una sola vez |
+| En cola | Se vuelve a encolar en orden de número |
+| Procesando (interrumpido) | Se vuelve a ejecutar desde cero en un hilo nuevo (las herramientas son de solo lectura, así que repetir es seguro) |
+| Decidido pero sin terminar | Se reanuda una sola vez con la decisión guardada |
+| Lista / falló | No se toca; sigue visible en `/estado` |
+
+La decisión de aprobar o rechazar se guarda en disco antes de reanudar el grafo, por lo que un pedido aprobado nunca se ejecuta dos veces, ni siquiera si el proceso se cae en el medio.
+
+Supuestos y límites: un solo proceso por base de datos (la cola y la recuperación asumen un único dueño), y los trabajos y checkpoints viejos todavía no se depuran, así que el archivo crece con el uso.
+
 ## Memoria de conversación
 
-El servicio recuerda los últimos turnos de cada solicitante (`MEMORY_TURNS`, por defecto 6; `0` la desactiva): la pregunta, la ruta, la respuesta y los resultados estructurados de las herramientas. Así, un seguimiento como "es sobre el primero que me pasaste, ¿qué pasó?" se resuelve contra la lista de pipelines de la consulta anterior. Las consultas de un mismo solicitante se procesan en orden.
+El servicio recuerda los últimos turnos de cada solicitante (`MEMORY_TURNS`, por defecto 6; `0` la desactiva), guardados en la misma base SQLite, así que sobreviven a un reinicio: la pregunta, la ruta, la respuesta y los resultados estructurados de las herramientas. Así, un seguimiento como "es sobre el primero que me pasaste, ¿qué pasó?" se resuelve contra la lista de pipelines de la consulta anterior. Las consultas de un mismo solicitante se procesan en orden.
 
 El bot nunca adivina: si la referencia no se puede resolver con certeza (no hay consulta previa, hay varios candidatos o el número no existe), responde con una pregunta breve de aclaración (ruta `clarify`) en lugar de consultar una herramienta con un identificador inventado. La CLI usa un único solicitante local; la API del servicio recibe `requester`.
 

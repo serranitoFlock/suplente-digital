@@ -19,6 +19,12 @@ export const config = {
   pendingPath: resolve(root, env("PENDING_PATH") ?? "data/pending.json"),
   /** One JSON trace per request (metadata only: no prompts or replies). */
   tracesPath: resolve(root, env("TRACES_PATH") ?? "data/traces.jsonl"),
+  /**
+   * SQLite database (`ASSISTANT_DB_PATH`, default `data/assistant.db`, built-in `node:sqlite`): LangGraph
+   * checkpoints, jobs and short-term conversation memory, so a restart keeps pending approvals and unfinished work.
+   * One process per database. SQLite also writes `-wal` / `-shm` files next to it.
+   */
+  dbPath: resolve(root, env("ASSISTANT_DB_PATH") ?? "data/assistant.db"),
   /** Daily conversation log directory (`LOG_DIR`): one `YYYY-MM-DD.jsonl` per local day, with questions and answers. */
   logDir: resolve(root, env("LOG_DIR") ?? "data/logs"),
   embeddingModel: env("EMBEDDING_MODEL") ?? "Xenova/multilingual-e5-small",

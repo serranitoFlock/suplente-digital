@@ -30,12 +30,26 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 ## Request lifecycle (instant acknowledgement)
 
 1. `AssistantService.submit(text, { requester })` returns `{ id, ack }` immediately. The ack is deterministic (no model call): "Recibido 👀 (consulta #N). …", with a cheap keyword hint (sensitive / live lookup / general) and how many requests are ahead in the queue.
-2. The job runs the graph in an in-process queue (`ASSISTANT_CONCURRENCY`, default 1). Job states: `queued` → `running` → `done` | `needs_approval` | `failed`.
+2. The job runs the graph in an in-process queue (`ASSISTANT_CONCURRENCY`, default 1); jobs are stored in SQLite (see [Persistence and restarts](#persistence-and-restarts)). Job states: `queued` → `running` → `done` | `needs_approval` | `failed`.
 3. The service emits `done` (answer), `needs_approval` (draft for the human backup) or `failed` (friendly Spanish message; technical detail kept separately). Transports (CLI today, Teams/Slack later) deliver these as follow-up messages.
 4. `approve(id, note?)` / `reject(id, note?)` resume a paused job exactly once; a second decision returns `not_pending`. `status(id)` and `list()` expose job state.
 5. The pending log serializes writes so concurrent jobs never drop entries.
 
 `npm run eval` still calls the graph directly (sequentially), so eval numbers are unaffected by the queue.
+
+## Persistence and restarts
+
+- One SQLite file (`ASSISTANT_DB_PATH`, default `data/assistant.db`, gitignored with its `-wal` / `-shm` files) through the built-in `node:sqlite` (Node >= 22.13; no native dependency). It holds the LangGraph checkpoints (`SqliteCheckpointSaver`), the jobs (`SqliteJobStore`) and the conversation memory (`SqliteConversationMemory`); each module owns append-only migrations (`src/persistence/`).
+- Job ids come from a counter in the database, so they keep increasing across restarts, and thread ids (`job-<id>`, `job-<id>-a<attempt>` for re-runs) are stable, so a new process finds the checkpoints of a paused job.
+- Restart policy (`AssistantService.recover()`, called once at startup after the listeners are attached and before any `submit()`):
+  - `needs_approval` stays waiting and is approved/rejected as usual;
+  - `queued` is scheduled again in id order (per-requester order preserved);
+  - `running` (interrupted mid-run) is re-run from scratch on a fresh thread; this is safe because tools are read-only;
+  - a decided but unfinished job (decision saved, resume not completed) is resumed once with the saved decision;
+  - `done` / `failed` are left as they are.
+- Exactly-once approvals: `approve` / `reject` flip the job with one conditional `UPDATE jobs … WHERE id = ? AND status = 'needs_approval'` (inside a `BEGIN IMMEDIATE` transaction) that also stores the decision, committed before the resume is scheduled. A second decision (in this or another process) matches no row and returns `not_pending`; a crash after the commit leaves a decided job that recovery resumes once.
+- Single-process assumption: one process owns a database's queue. Old jobs and checkpoints are not pruned yet.
+- Tests keep the in-memory defaults (`InMemoryJobStore`, `InMemoryConversationMemory`, `MemorySaver`) when no store is passed.
 
 ## Daily conversation log
 
@@ -67,7 +81,7 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 
 ## Conversation memory (short-term)
 
-- The service keeps the last N completed turns per requester (`MEMORY_TURNS`, default 6; `0` disables it) behind the `ConversationMemory` interface (`src/memory/conversation-memory.ts`; in memory today, swappable for a persistent store). Each turn holds the user text, the route, the final answer and the structured tool results (e.g. the list of failed pipelines).
+- The service keeps the last N completed turns per requester (`MEMORY_TURNS`, default 6; `0` disables it) behind the `ConversationMemory` interface (`src/memory/conversation-memory.ts`; persisted in SQLite by `SqliteConversationMemory`, in memory in tests). Each turn holds the user text, the route, the final answer and the structured tool results (e.g. the list of failed pipelines).
 - The CLI uses a single local requester id (`local`); the service API takes `submit(text, { requester })`. Requests without a requester get no memory.
 - Requests from the same requester run in order (the next one starts after the previous one completed or paused for approval); memory is appended only when a job completes, so a follow-up always sees finished turns. Different requesters still share the queue concurrency.
 - The history is passed to the router, to the tool-selection prompt and to the answer prompt as delimited untrusted context (`<conversacion>`): it helps interpret the current message, never replaces the docs as the source of facts.
@@ -168,11 +182,12 @@ Threat model and residual risks: [`security.md`](security.md).
 - [x] `npm run summary` groups pending entries by topic and suggests docs to write.
 - [x] Everything runs without credentials except the LLM calls (mock tools, local embeddings).
 - [x] Every request gets an instant acknowledgement (no model call); results, approval requests and failures arrive later as events tagged with the request number.
-- [x] CI runs typecheck and unit tests on every push and pull request (Node 22.12 and 24), without LLM calls, network-dependent tests or secrets.
+- [x] CI runs typecheck and unit tests on every push and pull request (Node 22.13 and 24), without LLM calls, network-dependent tests or secrets.
 - [x] Questions about the assistant get a fixed capabilities description, never "No sé".
 - [x] Every completed request (and every approval decision) appends one line to the daily log `data/logs/YYYY-MM-DD.jsonl` with the full cited answer, tool calls, latency, tokens and trace id.
 - [x] Follow-ups resolve against the requester's recent tool results; unresolvable references get a clarification question, never a tool call with an invented id.
 - [x] Engram notes are indexed only from allowlisted projects and only when they are project-scoped, live, the latest version of their topic, not superseded and free of token formats; real exports, the allowlist and the index never enter git.
+- [x] Jobs waiting for approval, queued and interrupted jobs and conversation memory survive a restart; an approval made after a restart resumes the job exactly once.
 - [x] Unit tests cover chunking, ranking, router parsing, safety net, pending store/summary, tools, graph flows and the assistant service (ack, queue limit, done / failed / approval flows) with a fake LLM or fake graph.
 
 ## Eval plan

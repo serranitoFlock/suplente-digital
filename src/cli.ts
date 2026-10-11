@@ -1,5 +1,5 @@
 import { clearLine, createInterface, cursorTo } from "node:readline";
-import { HELP_TEXT, parseCommand, renderJobs } from "./cli-commands.js";
+import { HELP_TEXT, parseCommand, renderJobs, renderRecovery } from "./cli-commands.js";
 import { config, loadCostRates, loadLlmSettings } from "./config.js";
 import { buildGraph } from "./graph/graph.js";
 import { DailyJsonlLog } from "./logging/conversation-log.js";
@@ -8,7 +8,7 @@ import { computeStats, renderStats } from "./observability/stats.js";
 import { JsonlTraceExporter, Tracer } from "./observability/tracing.js";
 import { PendingStore } from "./pending/store.js";
 import { renderWelcomeBack } from "./pending/summary.js";
-import { InMemoryConversationMemory } from "./memory/conversation-memory.js";
+import { openAssistantStores } from "./persistence/assistant-db.js";
 import { LocalE5Embedder } from "./rag/embeddings.js";
 import { Retriever } from "./rag/retriever.js";
 import { AssistantService, DEFAULT_REQUESTER, graphRunner, type DecisionResult } from "./service/assistant-service.js";
@@ -20,23 +20,29 @@ async function main(): Promise<void> {
 
   const pending = new PendingStore(config.pendingPath);
   const log = new DailyJsonlLog(config.logDir);
+  const stores = openAssistantStores(config.dbPath, { memoryTurns: config.assistant.memoryTurns });
   const tools = await createToolProvider(config.mcp, config.scripts);
   const retriever = await Retriever.load(
     config.indexPath,
     new LocalE5Embedder(config.embeddingModel, config.transformersCacheDir),
     config.retrieval,
   );
-  const graph = buildGraph({
-    llm: createLlm(llmSettings),
-    retriever,
-    tools,
-    pending,
-    allowedLinkHosts: config.security.allowedLinkHosts,
-  });
+  const graph = buildGraph(
+    {
+      llm: createLlm(llmSettings),
+      retriever,
+      tools,
+      pending,
+      allowedLinkHosts: config.security.allowedLinkHosts,
+    },
+    stores.checkpointer,
+  );
+  // Thread ids use the service's stable default prefix (job ids are unique per database), so checkpoints
+  // written before a restart are found again.
   const service = new AssistantService(graphRunner(graph, tracer), {
     concurrency: config.assistant.concurrency,
-    threadPrefix: `cli-${Date.now()}`,
-    memory: new InMemoryConversationMemory(config.assistant.memoryTurns),
+    jobs: stores.jobs,
+    memory: stores.memory,
     showCitations: config.presentation.showCitations,
     log,
   });
@@ -121,10 +127,11 @@ async function main(): Promise<void> {
       await service.idle();
       const awaiting = service.list().filter((job) => job.status === "needs_approval");
       if (awaiting.length > 0) {
-        print(`Quedaron ${awaiting.length} pedido(s) sin decisión (${awaiting.map((j) => `#${j.id}`).join(", ")}); no se ejecutó nada.`);
+        print(`Quedaron ${awaiting.length} pedido(s) sin decisión (${awaiting.map((j) => `#${j.id}`).join(", ")}); no se ejecutó nada y quedan guardados para la próxima sesión.`);
       }
       await tools.close?.();
       await tracer.flush();
+      stores.close();
     })().catch((error: unknown) => {
       console.error(error instanceof Error ? error.message : error);
       process.exitCode = 1;
@@ -133,6 +140,9 @@ async function main(): Promise<void> {
 
   console.log(`Suplente digital (modelo ${describeLlm(llmSettings)}, herramientas: ${tools.name}, scripts registrados: ${tools.scripts?.size ?? 0}).`);
   console.log(`Escribí tu consulta: te confirmo al instante y te respondo cuando esté lista. ${HELP_TEXT}\n`);
+  // After the listeners are attached and before reading input: continue what the previous run left unfinished.
+  const recovered = renderRecovery(service.recover());
+  if (recovered) console.log(`${recovered}\n`);
   rl.prompt();
 }
 

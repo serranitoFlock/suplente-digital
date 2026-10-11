@@ -1,4 +1,4 @@
-import type { JobStatus, JobView } from "./service/assistant-service.js";
+import type { JobStatus, JobView, RecoveryReport } from "./service/assistant-service.js";
 
 export type CliCommand =
   | { kind: "empty" }
@@ -53,6 +53,29 @@ const STATUS_LABELS: Record<JobStatus, string> = {
 export function renderJobs(jobs: JobView[]): string {
   if (jobs.length === 0) return "No hay consultas todavía.";
   return jobs.map((job) => `#${job.id} [${STATUS_LABELS[job.status]}] ${truncate(job.question, 70)}`).join("\n");
+}
+
+/**
+ * Startup line describing what `AssistantService.recover()` picked up from the previous run, or `undefined`
+ * when nothing was left over (so a fresh start prints nothing extra).
+ */
+export function renderRecovery(report: RecoveryReport): string | undefined {
+  const lines: string[] = [];
+  const ids = (list: number[]) => list.map((id) => `#${id}`).join(", ");
+  if (report.pending.length > 0) {
+    lines.push(
+      `${report.pending.length} pedido(s) siguen esperando aprobación (${ids(report.pending)}): ` +
+        "ver /pendientes o /estado, y decidir con /aprobar <número> o /rechazar <número>.",
+    );
+  }
+  const continued = [...report.requeued, ...report.rerun].sort((a, b) => a - b);
+  if (continued.length > 0) {
+    lines.push(`${continued.length} consulta(s) sin terminar se vuelven a procesar (${ids(continued)}); te respondo cuando estén listas.`);
+  }
+  if (report.resumed.length > 0) {
+    lines.push(`${report.resumed.length} pedido(s) ya decididos se completan ahora (${ids(report.resumed)}).`);
+  }
+  return lines.length > 0 ? `Recuperado de la sesión anterior:\n- ${lines.join("\n- ")}` : undefined;
 }
 
 function truncate(text: string, max: number): string {
