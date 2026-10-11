@@ -1,0 +1,7 @@
+# Bonsai 27B (1-bit) with an 8k context window for suplente-digital.
+# The Ollama app default (OLLAMA_CONTEXT_LENGTH, often 64k) reserves KV cache for the whole
+# window: ~8.2 GB loaded at 64k vs ~4.7 GB at 8k. Requests here use ~1.6k input tokens
+# (p95 ~2.1k) plus up to 4096 output tokens, so 8k leaves room for short-term memory.
+# Create it with: ollama create bonsai-suplente -f config/ollama/bonsai-suplente.Modelfile
+FROM hf.co/prism-ml/Bonsai-27B-gguf:Q1_0
+PARAMETER num_ctx 8192
