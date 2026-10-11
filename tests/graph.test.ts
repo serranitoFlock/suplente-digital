@@ -121,13 +121,41 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
     expect(await pending.list()).toEqual([]);
   });
 
-  it("lists only the sources the reply cites and none when it cites nothing", async () => {
+  it("lists only the sources the reply cites", async () => {
     const cited = await askAgent(graphFor({ route: "question", answer: "Lo define el manifiesto [1]." }), "¿Qué bundle carga el manifiesto del CDN?", "s1");
     expect(cited.state.citedSources).toMatchObject([{ n: 1, source: "cdn.md" }]);
-    const uncited = await askAgent(graphFor({ route: "question", answer: "Lo define el manifiesto." }), "¿Qué bundle carga el manifiesto del CDN?", "s2");
-    expect(uncited.state.sources.length).toBeGreaterThan(0);
-    expect(uncited.state.citedSources).toEqual([]);
-    expect(uncited.state.answer).not.toContain("Fuentes:");
+  });
+
+  // Measured on Bonsai (2026-10-11): grounded answers always cited at least one [n]; replies to unanswerable
+  // questions that skipped the NO_SE token ("No se menciona ninguna librería…") cited nothing.
+  it('says "no sé" and logs a pending item when the reply cites no valid source', async () => {
+    for (const answer of ["Lo define el manifiesto.", "Ver el documento [9]."]) {
+      const thread = `s2-${answer.length}`;
+      const { state } = await askAgent(graphFor({ route: "question", answer }), "¿Qué bundle carga el manifiesto del CDN?", thread);
+      expect(state.outcome).toBe("unknown");
+      expect(state.answer).toMatch(/^No sé/);
+      expect(state.citedSources).toEqual([]);
+    }
+    expect((await pending.list()).map((entry) => entry.reason)).toEqual(["unknown", "unknown"]);
+  });
+
+  // Bonsai also declined in prose and then cited every source at once ("No se menciona … [1, 2, 3, 4, 5, 6]").
+  it('says "no sé" when the reply opens by saying the documents do not cover the question', async () => {
+    const declines = [
+      "No se menciona ninguna librería de gráficos en los documentos proporcionados. [1, 2]",
+      "Los documentos proporcionados no indican qué librería usar [1].",
+      "No hay información sobre SSR en la documentación [1, 2].",
+    ];
+    for (const [i, answer] of declines.entries()) {
+      const { state } = await askAgent(graphFor({ route: "question", answer }), "¿Qué bundle carga el manifiesto del CDN?", `d${i}`);
+      expect(state.outcome).toBe("unknown");
+    }
+  });
+
+  it("keeps a partial answer that only notes a gap after answering", async () => {
+    const answer = "Lo define el manifiesto del ambiente [1]. No se menciona cómo cambiarlo en producción.";
+    const { state } = await askAgent(graphFor({ route: "question", answer }), "¿Qué bundle carga el manifiesto del CDN?", "p1");
+    expect(state.outcome).toBe("answered");
   });
 
   it('says "no sé" and logs a pending item when the model lacks context', async () => {

@@ -46,9 +46,22 @@ export function makeAnswerNode({ llm, retriever, pending, allowedLinkHosts }: Pi
     const sources = chunks.map(({ source, heading, score }) => ({ source, heading, score }));
     // Only sources the reply actually cites are listed (original numbers kept so markers still match).
     const citedSources = selectCitedSources(sources, reply);
+    // Deterministic "no sé": a reply grounded in the documents cites at least one valid [n], and does not open by
+    // saying the documents do not cover the question (the model sometimes declines in prose without NO_SE).
+    if (citedSources.length === 0 || opensWithDecline(reply)) return unknown(state);
     const footer = citedSources.length > 0 ? `\n\nFuentes:\n${formatCitedSources(citedSources)}` : "";
     return { outcome: "answered", sources, citedSources, answer: `${reply}${footer}` };
   };
+}
+
+/** "No se menciona…", "No hay información…", "Los documentos (proporcionados) no…": declines in prose. */
+const DECLINE_OPENING =
+  /^(no se (menciona|encuentra|especifica|indica|incluye|detalla|describe|documenta)|no hay (informaci[oó]n|datos|menci[oó]n)|no tengo (esa |la )?informaci[oó]n|(la documentaci[oó]n|los documentos)( proporcionados?)? no )/iu;
+
+/** True when the first sentence of the reply says the documents do not cover the question. */
+export function opensWithDecline(reply: string): boolean {
+  const first = reply.trim().replace(/^[*_>\s-]+/u, "").split(/(?<=[.!?])\s/u)[0] ?? "";
+  return DECLINE_OPENING.test(first);
 }
 
 function answerFromContext(llm: Llm, question: string, chunks: ScoredChunk[], history: ConversationTurn[]): Promise<string> {
