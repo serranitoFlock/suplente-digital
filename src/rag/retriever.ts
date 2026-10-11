@@ -3,6 +3,7 @@ import type { Chunk } from "./chunk.js";
 import { selectContext, type ContextOptions } from "./context-selection.js";
 import { cosineSimilarity, type Embedder } from "./embeddings.js";
 import { normalizeQuery, type QueryRewrite } from "./glossary.js";
+import { maskUnknownIdentifiers } from "./query-normalization.js";
 
 export interface IndexedChunk extends Chunk {
   embedding: number[];
@@ -15,6 +16,8 @@ export interface VectorIndex {
   composition?: Partial<Record<string, number>>;
   /** Glossary rewrites applied to every query before embedding (`knowledge/glosario.md`); absent in older indexes. */
   queryRewrites?: QueryRewrite[];
+  /** Identifier-like tokens of the corpus (see query-normalization.ts); absent in older indexes, which then mask nothing. */
+  identifiers?: string[];
   chunks: IndexedChunk[];
 }
 
@@ -58,9 +61,17 @@ export class Retriever {
     return new Retriever(JSON.parse(raw) as VectorIndex, embedder, options);
   }
 
+  /**
+   * Text embedded for `query`: identifiers the corpus never mentions are masked, then glossary aliases
+   * are rewritten. Only retrieval sees it; the rest of the pipeline keeps the original question.
+   */
+  searchText(query: string): string {
+    return normalizeQuery(maskUnknownIdentifiers(query, this.index.identifiers ?? []), this.index.queryRewrites ?? []);
+  }
+
   /** The whole index ranked for `query`, best first (retrieval metrics). */
   async rank(query: string): Promise<ScoredChunk[]> {
-    return scoreChunks(await this.embedder.embedQuery(normalizeQuery(query, this.index.queryRewrites ?? [])), this.index.chunks);
+    return scoreChunks(await this.embedder.embedQuery(this.searchText(query)), this.index.chunks);
   }
 
   /** The context passed to the model: source-balanced chunks for `query` (curated docs first). */

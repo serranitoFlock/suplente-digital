@@ -7,6 +7,7 @@ import { engramSourceDocs, filterObservations, parseEngramExport, type DropReaso
 import { loadEngramSourcesConfig } from "./engram-config.js";
 import { LocalE5Embedder, type Embedder } from "./embeddings.js";
 import { GLOSSARY_FILE, parseGlossary, type QueryRewrite } from "./glossary.js";
+import { buildIdentifierVocabulary } from "./query-normalization.js";
 import type { VectorIndex } from "./retriever.js";
 
 export type SourceOrigin = "knowledge" | "engram-sample" | "engram-real";
@@ -118,6 +119,8 @@ export async function buildIndexFromDocs(docs: SourceDoc[], embedder: Embedder, 
     const title = doc.title ?? documentTitle(doc.markdown);
     return chunkMarkdown(doc.source, doc.markdown).map((chunk) => ({ chunk, origin: doc.origin ?? "knowledge", passage: contextualPassage(chunk, title) }));
   });
+  // Sources too: Engram labels carry the project name (`engram:#<id> › acme-ui-kit › …`), which the note text may not repeat.
+  const identifiers = buildIdentifierVocabulary([...docs.map((doc) => doc.source), ...prepared.map((p) => p.passage)]);
   const chunks = prepared.map((p) => p.chunk);
   const vectors = await embedder.embedPassages(prepared.map((p) => p.passage));
   const composition: Partial<Record<SourceOrigin, number>> = {};
@@ -127,6 +130,7 @@ export async function buildIndexFromDocs(docs: SourceDoc[], embedder: Embedder, 
     createdAt: new Date().toISOString(),
     composition,
     ...(queryRewrites.length > 0 ? { queryRewrites } : {}),
+    ...(identifiers.length > 0 ? { identifiers } : {}),
     chunks: chunks.map((chunk, i) => ({ ...chunk, embedding: vectors[i]! })),
   };
 }
@@ -146,6 +150,7 @@ async function main(): Promise<void> {
   const index = await buildIndexFromDocs(docs, new LocalE5Embedder(config.embeddingModel, config.transformersCacheDir), queryRewrites);
   await mkdir(dirname(config.indexPath), { recursive: true });
   await writeFile(config.indexPath, JSON.stringify(index));
+  console.log(`Identifier vocabulary: ${index.identifiers?.length ?? 0} term(s) (unknown names in the same families are masked from queries)`);
   console.log(`Wrote ${index.chunks.length} chunks to ${config.indexPath} (${Object.entries(index.composition ?? {}).map(([origin, n]) => `${origin} ${n}`).join(", ")})`);
 }
 
