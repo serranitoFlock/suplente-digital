@@ -1,0 +1,22 @@
+{
+  "scripts": [
+    {
+      "id": "failed-jobs",
+      "description": "Lista los jobs de CI fallidos de los proyectos de ejemplo en los últimos N días (proyecto, job, rama, motivo y enlace).",
+      "command": "scripts/demo/failed-jobs.sh",
+      "argv": ["--days", "{days}", "--project", "{project}"],
+      "params": {
+        "days": { "type": "int", "min": 1, "max": 30, "default": 7, "description": "Días hacia atrás" },
+        "project": {
+          "type": "enum",
+          "values": ["todos", "acme-ui-kit", "acme-card-elements", "acme-shell", "acme-header-elements"],
+          "default": "todos",
+          "description": "Proyecto a consultar"
+        }
+      },
+      "readOnly": true,
+      "timeoutMs": 10000,
+      "env": []
+    }
+  ]
+}

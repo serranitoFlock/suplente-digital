@@ -18,9 +18,17 @@ function traced<S, U>(name: string, node: (state: S) => U | Promise<U>): (state:
 function tracedTools(tools: ToolProvider): ToolProvider {
   return {
     name: tools.name,
+    scripts: tools.scripts,
     call: (call) =>
-      withSpan(`execute_tool ${call.tool}`, { "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": call.tool, "app.tool.provider": tools.name }, () =>
-        tools.call(call),
+      withSpan(
+        `execute_tool ${call.tool}`,
+        {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.name": call.tool,
+          "app.tool.provider": tools.name,
+          ...(call.tool === "run_script" ? { "app.tool.script": call.args.script } : {}),
+        },
+        () => tools.call(call),
       ),
     close: tools.close?.bind(tools),
   };

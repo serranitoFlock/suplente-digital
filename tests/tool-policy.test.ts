@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { McpToolProvider, type McpClientLike, type McpRemoteTool } from "../src/tools/mcp-provider.js";
-import { TOOL_POLICIES, ToolNotAllowedError, assertToolAllowed, isAutoRunnable, type ToolCall, type ToolName } from "../src/tools/types.js";
+import { TOOL_POLICIES, ToolCallError, ToolNotAllowedError, assertToolAllowed, isAutoRunnable, parseToolCall, type ToolCall, type ToolName } from "../src/tools/types.js";
 
 const toolNames: Record<ToolName, string> = {
   get_ticket: "get_issue",
@@ -33,6 +33,15 @@ describe("tool allowlist", () => {
   it("refuses tools outside the allowlist", () => {
     expect(() => assertToolAllowed("delete_ticket")).toThrow(ToolNotAllowedError);
     expect(() => assertToolAllowed("get_ticket")).not.toThrow();
+  });
+
+  it("declares run_script as a read-only, unattended catalog tool", () => {
+    expect(TOOL_POLICIES.run_script).toEqual({ readOnly: true, permission: "always_allow" });
+    expect(parseToolCall('{"tool":"run_script","args":{"script":"failed-jobs","args":{"days":3}}}')).toEqual({
+      tool: "run_script",
+      args: { script: "failed-jobs", args: { days: 3 } },
+    });
+    expect(parseToolCall('{"tool":"run_script","args":{"args":{}}}')).toBeNull();
   });
 
   it("only auto-runs always_allow tools", () => {
@@ -72,6 +81,15 @@ describe("McpToolProvider (fake MCP client)", () => {
     const mapping = { ...toolNames, get_ticket: { name: "jira_update_issue", args: { issue_key: { arg: "key" } } } };
     await expect(McpToolProvider.fromClient(client, mapping)).rejects.toThrow(/jira_update_issue/);
     expect(closed).toBe(true);
+  });
+
+  it("never maps run_script to an MCP tool and never sends it to the server", async () => {
+    const calls: string[] = [];
+    const mapping = { ...toolNames, run_script: "run_anything" } as unknown as Record<ToolName, string>;
+    await expect(McpToolProvider.fromClient(fakeClient(remote(), calls), mapping)).rejects.toThrow(ToolNotAllowedError);
+    const provider = await McpToolProvider.fromClient(fakeClient(remote(), calls), toolNames);
+    await expect(provider.call({ tool: "run_script", args: { script: "x", args: {} } })).rejects.toThrow(ToolCallError);
+    expect(calls).toEqual([]);
   });
 
   it("refuses a mapping for a local tool name outside the allowlist", async () => {

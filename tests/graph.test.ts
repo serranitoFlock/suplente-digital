@@ -7,13 +7,15 @@ import { CAPABILITIES_MESSAGE } from "../src/graph/capabilities.js";
 import { DRAFT_PROMPT, REFUSAL_MESSAGE } from "../src/graph/escalate.js";
 import { askAgent, buildGraph, resumeAgent, type AgentGraph } from "../src/graph/graph.js";
 import { ROUTER_PROMPT } from "../src/graph/router.js";
-import { TOOL_SELECTION_PROMPT, TOOL_SUMMARY_PROMPT } from "../src/graph/task.js";
+import { TOOL_SELECTION_PROMPT, TOOL_SUMMARY_PROMPT, toolSelectionPrompt } from "../src/graph/task.js";
 import type { Llm } from "../src/llm.js";
 import { PendingStore } from "../src/pending/store.js";
 import { buildIndexFromDocs } from "../src/rag/ingest.js";
 import { Retriever, type VectorIndex } from "../src/rag/retriever.js";
 import type { ConversationTurn } from "../src/graph/state.js";
 import { MockToolProvider } from "../src/tools/mock-provider.js";
+import { ScriptToolProvider } from "../src/tools/script-provider.js";
+import { loadScriptRegistry } from "../src/tools/scripts.js";
 import { ToolCallError, type ToolCall, type ToolProvider } from "../src/tools/types.js";
 import { FakeEmbedder } from "./helpers/fake-embedder.js";
 
@@ -331,6 +333,86 @@ describe("agent graph (fake LLM, fake embeddings)", () => {
       expect(state.route).toBe("sensitive");
       expect(review).toBeDefined();
       expect(tools.calls).toEqual([]);
+    });
+  });
+  describe("registered read-only scripts (run_script)", () => {
+    const scriptGraph = async (tool: string, seen: string[], execute?: () => Promise<string>) => {
+      const registry = await loadScriptRegistry(join(process.cwd(), "config/scripts.example.json"), process.cwd());
+      const tools = new ScriptToolProvider(new MockToolProvider(), registry, execute ? { execute } : {});
+      return buildGraph({
+        llm: async (system, user) => {
+          if (system === ROUTER_PROMPT) return JSON.stringify({ route: "task", topic: "pipelines", reason: "test" });
+          if (system === toolSelectionPrompt(registry)) {
+            seen.push("tool_selection");
+            return tool;
+          }
+          if (system === TOOL_SUMMARY_PROMPT) {
+            seen.push(`summary:${user}`);
+            return "Fallaron jobs en acme-ui-kit.";
+          }
+          throw new Error("unexpected prompt");
+        },
+        retriever: new Retriever(index, embedder, { docSlots: 2, minScore: 0.3 }),
+        tools,
+        pending,
+      });
+    };
+
+    it("lists the registered scripts in the tool-selection prompt only when there are any", async () => {
+      const registry = await loadScriptRegistry(join(process.cwd(), "config/scripts.example.json"), process.cwd());
+      expect(toolSelectionPrompt(undefined)).toBe(TOOL_SELECTION_PROMPT);
+      expect(TOOL_SELECTION_PROMPT).not.toContain("run_script");
+      const prompt = toolSelectionPrompt(registry);
+      expect(prompt).toContain("run_script");
+      expect(prompt).toContain("failed-jobs");
+      expect(prompt).toMatch(/days/);
+    });
+
+    it("runs the script the model picks and summarizes its output as untrusted data", async () => {
+      const seen: string[] = [];
+      const graph = await scriptGraph('{"tool":"run_script","args":{"script":"failed-jobs","args":{"days":3}}}', seen);
+      const { state } = await askAgent(graph, "¿Qué jobs de CI fallaron en los últimos 3 días?", "s1");
+      expect(state.outcome).toBe("answered");
+      expect(seen.find((s) => s.startsWith("summary:"))).toMatch(/<resultado_herramienta[\s\S]*acme-ui-kit/);
+      expect(state.answer).toContain("Fallaron jobs en acme-ui-kit.");
+      expect(state.answer).toContain("script failed-jobs");
+      expect(state.toolCalls).toMatchObject([
+        { tool: "run_script", args: { script: "failed-jobs", args: { days: 3, project: "todos" } }, readOnly: true, result: [{ project: "acme-ui-kit" }, { project: "acme-card-elements" }] },
+      ]);
+    });
+
+    it.each([
+      ["an unknown script", '{"tool":"run_script","args":{"script":"retry-job","args":{"job":1}}}'],
+      ["invalid arguments", '{"tool":"run_script","args":{"script":"failed-jobs","args":{"days":"3; rm -rf /"}}}'],
+    ])("treats %s as an invalid tool choice: nothing runs", async (_, tool) => {
+      const seen: string[] = [];
+      let executed = false;
+      const graph = await scriptGraph(tool, seen, async () => {
+        executed = true;
+        return "[]";
+      });
+      const { state } = await askAgent(graph, "reintentá el job 1", "s2");
+      expect(executed).toBe(false);
+      expect(state.outcome).toBe("unknown");
+      expect(seen.some((s) => s.startsWith("summary:"))).toBe(false);
+      expect(await pending.list()).toMatchObject([{ reason: "unsupported_task" }]);
+    });
+
+    it("does not accept run_script when no script is registered", async () => {
+      const graph = graphFor({ route: "task", tool: '{"tool":"run_script","args":{"script":"failed-jobs","args":{}}}' });
+      const { state } = await askAgent(graph, "jobs fallidos", "s3");
+      expect(state.outcome).toBe("unknown");
+      expect(await pending.list()).toMatchObject([{ reason: "unsupported_task" }]);
+    });
+
+    it("answers safely when the script fails", async () => {
+      const seen: string[] = [];
+      const graph = await scriptGraph('{"tool":"run_script","args":{"script":"failed-jobs","args":{}}}', seen, async () => {
+        throw new ToolCallError("run_script", "script_error");
+      });
+      const { state } = await askAgent(graph, "jobs fallidos", "s4");
+      expect(state.answer).toMatch(/No pude completar la consulta de solo lectura/);
+      expect(await pending.list()).toMatchObject([{ reason: "tool_failure" }]);
     });
   });
 });

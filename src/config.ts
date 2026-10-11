@@ -80,6 +80,14 @@ export const config = {
       list_failed_pipelines: env("MCP_TOOL_LIST_FAILED_PIPELINES") ?? "list_failed_pipelines",
     },
   },
+  /**
+   * Human-registered read-only query scripts (`SCRIPTS_CONFIG`, default `config/scripts.local.json`,
+   * optional; see `config/scripts.example.json`). Command and cwd paths resolve against the repo root.
+   */
+  scripts: {
+    configPath: resolve(root, env("SCRIPTS_CONFIG") ?? "config/scripts.local.json"),
+    root,
+  },
 } as const;
 
 export type AppConfig = typeof config;

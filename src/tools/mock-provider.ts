@@ -1,4 +1,4 @@
-import type { ToolCall, ToolProvider } from "./types.js";
+import { ToolCallError, type ToolCall, type ToolProvider } from "./types.js";
 
 interface Ticket {
   key: string;
@@ -57,6 +57,9 @@ export class MockToolProvider implements ToolProvider {
         const since = this.now.getTime() - call.args.sinceDays * DAY;
         return JSON.stringify(failedJobs(this.now).filter((job) => Date.parse(job.failedAt) >= since));
       }
+      // Scripts are served by `ScriptToolProvider` (registry + runner), never by this provider.
+      case "run_script":
+        throw new ToolCallError(call.tool, "missing_tool");
     }
   }
 }

@@ -20,7 +20,7 @@ async function main(): Promise<void> {
 
   const pending = new PendingStore(config.pendingPath);
   const log = new DailyJsonlLog(config.logDir);
-  const tools = await createToolProvider(config.mcp);
+  const tools = await createToolProvider(config.mcp, config.scripts);
   const retriever = await Retriever.load(
     config.indexPath,
     new LocalE5Embedder(config.embeddingModel, config.transformersCacheDir),
@@ -131,7 +131,7 @@ async function main(): Promise<void> {
     });
   });
 
-  console.log(`Suplente digital (modelo ${describeLlm(llmSettings)}, herramientas: ${tools.name}).`);
+  console.log(`Suplente digital (modelo ${describeLlm(llmSettings)}, herramientas: ${tools.name}, scripts registrados: ${tools.scripts?.size ?? 0}).`);
   console.log(`Escribí tu consulta: te confirmo al instante y te respondo cuando esté lista. ${HELP_TEXT}\n`);
   rl.prompt();
 }

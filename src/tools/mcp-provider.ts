@@ -4,8 +4,11 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { AppConfig } from "../config.js";
 import { DEFAULT_CALL_TIMEOUT_MS, loadMcpToolsConfig, mapToolArgs, resolveToolMappings, type ToolMapping } from "./mcp-config.js";
 import { MockToolProvider } from "./mock-provider.js";
+import { withScripts } from "./script-provider.js";
+import { loadScriptRegistry } from "./scripts.js";
 import {
   assertToolAllowed,
+  SCRIPT_TOOL,
   ToolCallError,
   ToolNotAllowedError,
   type ToolCall,
@@ -85,7 +88,10 @@ export class McpToolProvider implements ToolProvider {
 
     let remote: Map<string, McpRemoteTool>;
     try {
-      for (const local of Object.keys(normalized)) assertToolAllowed(local);
+      for (const local of Object.keys(normalized)) {
+        assertToolAllowed(local);
+        if (local === SCRIPT_TOOL) throw new ToolNotAllowedError(local, "is served by the script registry, never by an MCP server");
+      }
       remote = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
       for (const [local, { name }] of Object.entries(normalized)) {
         const hints = remote.get(name)?.annotations;
@@ -105,6 +111,7 @@ export class McpToolProvider implements ToolProvider {
   async call(call: ToolCall): Promise<string> {
     // Defense in depth: `parseToolCall` already validates, but never trust the caller here.
     assertToolAllowed(call.tool);
+    if (call.tool === SCRIPT_TOOL) throw new ToolCallError(call.tool, "missing_tool");
     const mapping = this.mappings[call.tool];
     if (!this.available.has(mapping.name)) throw new ToolCallError(call.tool, "missing_tool");
 
@@ -140,9 +147,16 @@ export class McpToolProvider implements ToolProvider {
 /**
  * Uses MCP when MCP_SERVER_COMMAND is configured, otherwise the credential-free mock.
  * Tool names and arguments come from the optional mapping file (`MCP_TOOLS_CONFIG`), else from `MCP_TOOL_*`.
+ * With a script registry (`SCRIPTS_CONFIG`) that registers at least one script, `run_script` goes to the
+ * script runner and every other tool to that provider.
  */
-export async function createToolProvider(mcp: AppConfig["mcp"]): Promise<ToolProvider> {
-  if (!mcp.command) return new MockToolProvider();
-  const mappings = resolveToolMappings({ ...mcp.toolNames }, await loadMcpToolsConfig(mcp.toolsConfigPath));
-  return McpToolProvider.connect(mcp.command, [...mcp.args], mappings, { timeoutMs: mcp.callTimeoutMs });
+export async function createToolProvider(mcp: AppConfig["mcp"], scripts?: AppConfig["scripts"]): Promise<ToolProvider> {
+  const registry = scripts ? await loadScriptRegistry(scripts.configPath, scripts.root) : undefined;
+  let base: ToolProvider;
+  if (!mcp.command) base = new MockToolProvider();
+  else {
+    const mappings = resolveToolMappings({ ...mcp.toolNames }, await loadMcpToolsConfig(mcp.toolsConfigPath));
+    base = await McpToolProvider.connect(mcp.command, [...mcp.args], mappings, { timeoutMs: mcp.callTimeoutMs });
+  }
+  return registry ? withScripts(base, registry) : base;
 }

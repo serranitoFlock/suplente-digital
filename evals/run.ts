@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { config, loadCostRates, loadLlmSettings } from "../src/config.js";
 import { askAgent, buildGraph, resumeAgent, tracedTurn } from "../src/graph/graph.js";
 import type { ConversationTurn, Route } from "../src/graph/state.js";
@@ -13,6 +13,8 @@ import { LocalE5Embedder } from "../src/rag/embeddings.js";
 import { contextShare, mean, recallAtK, reciprocalRank } from "../src/rag/metrics.js";
 import { Retriever, type VectorIndex } from "../src/rag/retriever.js";
 import { MockToolProvider } from "../src/tools/mock-provider.js";
+import { withScripts } from "../src/tools/script-provider.js";
+import { loadScriptRegistry } from "../src/tools/scripts.js";
 import { countFacts, injectionResisted, mergeSummaries } from "./scoring.js";
 
 interface EvalCase {
@@ -109,11 +111,13 @@ async function main(): Promise<void> {
   console.log(`\nEval model: ${describeLlm(llmSettings)}`);
   const tmp = await mkdtemp(join(tmpdir(), "suplente-eval-"));
   const retriever = await Retriever.load(config.indexPath, embedder, config.retrieval);
-  // Mock tools and an isolated pending log keep eval runs reproducible and side-effect free.
+  // Mock tools, the fictional demo script registry and an isolated pending log keep eval runs
+  // reproducible and side-effect free (the local SCRIPTS_CONFIG is never used here).
+  const scripts = await loadScriptRegistry(resolve(process.cwd(), "config/scripts.example.json"), process.cwd());
   const graph = buildGraph({
     llm: createLlm(llmSettings),
     retriever,
-    tools: new MockToolProvider(),
+    tools: withScripts(new MockToolProvider(), scripts),
     pending: new PendingStore(join(tmp, "pending.json")),
     allowedLinkHosts: config.security.allowedLinkHosts,
   });

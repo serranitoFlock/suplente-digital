@@ -1,18 +1,37 @@
 import { renderHistory } from "../memory/conversation-memory.js";
 import { CLARIFY_NO_CONTEXT } from "../memory/references.js";
 import { sanitizeOutput, wrapUntrusted } from "../security/guards.js";
-import { isAutoRunnable, parseToolCall, ToolCallError, toolArgSchemas, toolDescriptions, type ToolCall } from "../tools/types.js";
+import {
+  isAutoRunnable,
+  parseToolCall,
+  SCRIPT_TOOL,
+  ToolCallError,
+  toolArgSchemas,
+  toolDescriptions,
+  type ScriptCatalog,
+  type ToolCall,
+} from "../tools/types.js";
 import type { ConversationTurn, GraphDeps, ReferencedItem, State, ToolCallRecord, Update } from "./state.js";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export const TOOL_SELECTION_PROMPT = `Elegí UNA herramienta de solo lectura para resolver el pedido. Herramientas:
-${Object.entries(toolDescriptions)
-  .map(([name, description]) => `- ${name}: ${description}`)
-  .join("\n")}
+const selectionPrompt = (extraTools: string[]): string => `Elegí UNA herramienta de solo lectura para resolver el pedido. Herramientas:
+${[...Object.entries(toolDescriptions).map(([name, description]) => `- ${name}: ${description}`), ...extraTools].join("\n")}
 Nunca inventes claves de tickets ni nombres: usá solo los que aparecen en el pedido o en la conversación reciente.
 Si ninguna sirve, usá {"tool": "none"}.
 Respondé SOLO con JSON: {"tool": "<nombre>", "args": {...}}`;
+
+/** Tool-selection prompt without registered scripts (`run_script` is not offered). */
+export const TOOL_SELECTION_PROMPT = selectionPrompt([]);
+
+/** Tool-selection prompt; lists `run_script` and each registered script only when there are any. */
+export function toolSelectionPrompt(scripts: ScriptCatalog | undefined): string {
+  if (!scripts?.size) return TOOL_SELECTION_PROMPT;
+  return selectionPrompt([
+    `- ${SCRIPT_TOOL}: Ejecuta un script de consulta de solo lectura registrado por una persona. Usa solo uno de estos ids y sus parámetros. args: {"script": "<id>", "args": {...}}`,
+    ...scripts.describe().map((line) => `  - ${line}`),
+  ]);
+}
 
 export const TOOL_SUMMARY_PROMPT = `Sos el suplente digital de un arquitecto frontend. Resumí en español neutro y en pocas líneas el resultado de la herramienta para responder el pedido.
 Usá solo los datos del resultado; si está vacío o es un error, decilo claramente. No ofrezcas ejecutar acciones: solo tenés acceso de lectura.
@@ -64,12 +83,18 @@ export function makeTaskNode({ llm, tools, pending, allowedLinkHosts }: Pick<Gra
       // Operational failures (timeout, server down, MCP error result) become a reply + pending item;
       // policy refusals and bugs still propagate.
       if (!(error instanceof ToolCallError)) throw error;
-      console.warn(`[tools] ${error.tool} failed via ${tools.name}: ${error.kind}`);
+      const script = call.tool === SCRIPT_TOOL ? ` (script ${call.args.script})` : "";
+      console.warn(`[tools] ${error.tool}${script} failed via ${tools.name}: ${error.kind}`);
       await pending.append({ question: state.question, topic: state.topic, reason: "tool_failure" });
       return { outcome: "unknown", toolCalls: [], answer: TOOL_FAILURE_MESSAGE };
     }
+    // For run_script, `args` is `{ script, args }`: the record, memory and logs keep the script id and its values.
     const record: ToolCallRecord = { tool: call.tool, args: call.args, readOnly: true, result: parseToolResult(result) };
-    return summarize(question, `${call.tool} ${JSON.stringify(call.args)}`, result, `(Consulta de solo lectura: ${call.tool} vía ${tools.name})`, [...extraRecords, record]);
+    const footer =
+      call.tool === SCRIPT_TOOL
+        ? `(Consulta de solo lectura: script ${call.args.script} del registro de scripts)`
+        : `(Consulta de solo lectura: ${call.tool} vía ${tools.name})`;
+    return summarize(question, `${call.tool} ${JSON.stringify(call.args)}`, result, footer, [...extraRecords, record]);
   };
 
   /** A follow-up that points at an earlier result: refresh tickets by key; reuse other items as they are. */
@@ -91,7 +116,12 @@ export function makeTaskNode({ llm, tools, pending, allowedLinkHosts }: Pick<Gra
     const history = state.history ?? [];
     if (state.reference?.kind === "resolved") return followUp(state, state.reference.item);
 
-    const call = parseToolCall(await llm(TOOL_SELECTION_PROMPT, selectionInput(state.question, history)));
+    let call = parseToolCall(await llm(toolSelectionPrompt(tools.scripts), selectionInput(state.question, history)));
+    // A script call counts only for a registered id with valid args; anything else is an invalid choice.
+    if (call?.tool === SCRIPT_TOOL) {
+      const resolved = tools.scripts?.resolve(call.args);
+      call = resolved ? { tool: SCRIPT_TOOL, args: resolved } : null;
+    }
     if (!call) {
       await pending.append({ question: state.question, topic: state.topic, reason: "unsupported_task" });
       return {
