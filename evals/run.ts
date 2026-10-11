@@ -15,7 +15,7 @@ import { Retriever, type VectorIndex } from "../src/rag/retriever.js";
 import { MockToolProvider } from "../src/tools/mock-provider.js";
 import { withScripts } from "../src/tools/script-provider.js";
 import { loadScriptRegistry } from "../src/tools/scripts.js";
-import { countFacts, injectionResisted, mergeSummaries } from "./scoring.js";
+import { calledNoTool, countFacts, injectionResisted, mergeSummaries } from "./scoring.js";
 
 interface EvalCase {
   id: string;
@@ -34,7 +34,7 @@ interface EvalCase {
   conversation?: string[];
   /** Multi-turn cases: a fixed history instead of (or before) `conversation`. */
   history?: ConversationTurn[];
-  /** The reply must not call any tool (e.g. a clarification instead of an invented id). */
+  /** No live tool may run (a clarification instead of an invented id, a write request that must escalate). */
   mustNotCallTools?: boolean;
   /** Why an expectation changed (kept next to the case so spec changes are visible, not silent). */
   note?: string;
@@ -44,7 +44,7 @@ interface EvalCase {
   excludedSources?: string[];
 }
 
-const isMultiTurn = (c: EvalCase) => Boolean(c.conversation?.length || c.history?.length || c.mustNotCallTools);
+const isMultiTurn = (c: EvalCase) => Boolean(c.conversation?.length || c.history?.length || c.expectedRoute === "clarify");
 
 const pctOf = (value: number | undefined) => (value === undefined ? "n/a" : `${Math.round(100 * value)}%`);
 
@@ -166,8 +166,9 @@ async function main(): Promise<void> {
           ? turn.state.route === testCase.expectedRoute &&
             hits === testCase.expectedFacts.length &&
             injectionResisted([turn.state.answer], testCase.mustNotMention ?? []) &&
-            (!testCase.mustNotCallTools || (turn.state.toolCalls ?? []).every((call) => call.fromMemory))
+            (!testCase.mustNotCallTools || calledNoTool(turn.state.toolCalls))
           : undefined,
+        noToolOk: testCase.mustNotCallTools ? calledNoTool(turn.state.toolCalls) : undefined,
       });
     }
   } finally {
@@ -184,6 +185,7 @@ async function main(): Promise<void> {
   console.log(`Injection resisted:  ${pct(rows.flatMap((r) => (r.injectionOk === undefined ? [] : [r.injectionOk])))}`);
   console.log(`Filtered notes unused: ${pct(rows.flatMap((r) => (r.filteredOk === undefined ? [] : [r.filteredOk])))} (excluded sources not indexed, reply free of their facts)`);
   console.log(`Follow-up / clarify: ${pct(rows.flatMap((r) => (r.multiTurnOk === undefined ? [] : [r.multiTurnOk])))} (route, facts, no invented ids, no tool call when a clarification is expected)`);
+  console.log(`No tool called:      ${pct(rows.flatMap((r) => (r.noToolOk === undefined ? [] : [r.noToolOk])))} (write requests and clarifications must not run any tool or script)`);
 
   const stats = computeStats(caseSummaries);
   const secs = (ms: number | undefined) => (ms === undefined ? "n/a" : `${(ms / 1000).toFixed(1)} s`);

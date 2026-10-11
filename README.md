@@ -40,14 +40,14 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 **Camino de adopción.**
 
 1. Reemplazar `knowledge/` por los runbooks y FAQs reales de la persona y ejecutar `npm run ingest`; reescribir `evals/questions.json` con preguntas reales (y `expectedSources`) para medirlo.
-2. Conectar un servidor MCP real (Jira / GitLab) con una credencial de **solo lectura**: `MCP_SERVER_COMMAND` + `MCP_TOOL_*`; la allowlist ya rechaza las herramientas de escritura.
+2. Conectar los servidores MCP reales (Jira / GitLab) con una credencial de **solo lectura**: `MCP_SERVER_COMMAND` + un archivo de mapeo (`MCP_TOOLS_CONFIG`) con los nombres y argumentos de cada servidor. El mapeo, el timeout y las fallas ya están probados contra un servidor MCP falso local; falta ejecutarlo contra los servidores reales, que solo son accesibles por VPN. Registrar los scripts de consulta del equipo (por ejemplo, monitores de pipelines) en `SCRIPTS_CONFIG` (ver [Integraciones de solo lectura](#integraciones-de-solo-lectura)).
 3. Agregar un adaptador para Teams (o Slack) sobre los eventos de `AssistantService` (ver [Acuse de recibo inmediato](#acuse-de-recibo-inmediato)) y una cola/checkpointer persistente.
 4. Enviar `data/traces.jsonl` al stack de observabilidad del equipo mediante un `TraceExporter` (OTel / Langfuse).
 
 **Limitaciones.**
 
-- La estimación anterior es ilustrativa; la tasa real de resolución depende de qué tan buenos y actualizados estén los documentos. El conjunto de evaluación (20 casos) mide la calidad de las respuestas, no la adopción.
-- Solo cubre las preguntas que los documentos responden y tres consultas de solo lectura; cualquier otra cosa se convierte en un pendiente, no en una respuesta.
+- La estimación anterior es ilustrativa; la tasa real de resolución depende de qué tan buenos y actualizados estén los documentos. El conjunto de evaluación (30 casos) mide la calidad de las respuestas, no la adopción.
+- Solo cubre las preguntas que los documentos responden, tres consultas de solo lectura y los scripts de consulta que una persona registre; cualquier otra cosa se convierte en un pendiente, no en una respuesta.
 - Un modelo local de 27B tarda ~10 s por pedido (p50 en el conjunto de evaluación); eso es aceptable con acuse de recibo inmediato, pero no para un intercambio conversacional ágil.
 - Por ahora solo CLI: sin autenticación, sin permisos por usuario, cola en memoria.
 
@@ -56,7 +56,7 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 | Tema | Dónde está implementado | Dónde está documentado / medido |
 |-------|-------------------------|-----------------------------------|
 | Orquestación | `src/graph/graph.ts` (`StateGraph` de LangGraph, router → RAG / herramientas / revisión humana, `interrupt()` para aprobaciones), `src/service/*` (acuse inmediato + cola en segundo plano) | [Arquitectura](#arquitectura), [`docs/spec.md`](docs/spec.md) (en inglés) → Routes, Request lifecycle; precisión de ruteo en `npm run eval` |
-| MCP | `src/tools/mcp-provider.ts` (cliente MCP por stdio, allowlist de solo lectura, rechaza herramientas destructivas), `src/tools/types.ts` (`ToolProvider`, `TOOL_POLICIES`) | [`docs/spec.md`](docs/spec.md) (en inglés) → Tools & permissions; `tests/tool-policy.test.ts`. La conexión con un servidor real es el próximo paso (T2) |
+| MCP | `src/tools/mcp-provider.ts` (cliente MCP por stdio, allowlist de solo lectura, rechaza herramientas destructivas, timeout por llamada), `src/tools/mcp-config.ts` (mapeo de nombres y argumentos remotos), `src/tools/types.ts` (`ToolProvider`, `TOOL_POLICIES`) | [`docs/spec.md`](docs/spec.md) (en inglés) → Tools & permissions; `tests/tool-policy.test.ts`, `tests/mcp-integration.test.ts` (servidor MCP falso por stdio: mapeo, herramienta destructiva rechazada, timeout, caída). Probado localmente; falta ejecutarlo contra los servidores reales de Jira / GitLab detrás de la VPN (T2) |
 | RAG | `src/rag/*` (chunks según encabezados, encabezado contextual, embeddings multilingües locales, notas de Engram filtradas), `src/graph/answer.ts` (citas, "No sé") | [`docs/spec.md`](docs/spec.md) (en inglés) → Eval plan (recall@k, MRR, experimento de encabezado contextual); tasa de aciertos de hechos y "no sé" en `npm run eval` |
 | Observabilidad | `src/observability/*` (un trace por pedido, atributos OTel GenAI, exportador JSONL), CLI `/stats` | [Observabilidad y costo](#observabilidad-y-costo); latencia p50/p95 en `npm run eval` |
 | Seguridad | `src/security/guards.ts`, `src/graph/router.ts` (red de seguridad), `TOOL_POLICIES`, aprobación humana (human-in-the-loop) | [`docs/security.md`](docs/security.md) (en inglés) (lethal trifecta, OWASP LLM01/02/06); inyecciones resistidas en `npm run eval` |
@@ -66,23 +66,24 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 
 ## Resultados de la evaluación
 
-`npm run eval` con PrismML Bonsai 27B (1-bit `Q1_0`, servido por Ollama 0.40.3 con `reasoning_effort: "none"`), 26 casos, ejecutado el 2026-10-11 con un índice reproducible (`ENGRAM_REAL=false`: `knowledge/*.md` + la muestra ficticia de Engram):
+`npm run eval` con PrismML Bonsai 27B (1-bit `Q1_0`, servido por Ollama 0.40.3 como `bonsai-suplente`, contexto de 8k, con `reasoning_effort: "none"`), 30 casos, ejecutado el 2026-10-11 con un índice reproducible (`ENGRAM_REAL=false`: `knowledge/*.md` + la muestra ficticia de Engram):
 
 | Métrica | Resultado |
 |--------|--------|
 | Recall@1 / recall@4 / MRR de recuperación (14 casos con `expectedSources`) | 86% / 100% / 0.917 |
 | Context share (fragmentos enviados al modelo que vienen de la fuente esperada) | 78% |
-| Precisión de ruteo | 100% (26/26) |
-| Tasa de aciertos de hechos | 94% (`cdn-not-loading` 1/2, `engram-safari-styles` 1/2) |
+| Precisión de ruteo | 100% (30/30) |
+| Tasa de aciertos de hechos | 93% (`cdn-not-loading` 1/2, `inject-script-output` 0/1) |
 | "No sé" correcto | 94% (`unknown-charts` respondió en lugar de decir "No sé") |
-| Inyecciones resistidas (3 casos adversariales) | 100% (3/3) |
+| Inyecciones resistidas (4 inyecciones + 2 pedidos de escritura sobre CI) | 100% (6/6) |
 | Notas de Engram filtradas sin usar (1 caso) | 100% (1/1) |
 | Seguimiento / aclaración (2 casos multi-turno) | 100% (2/2) |
-| Latencia por caso | p50 9.6 s · p95 20.0 s |
-| Tokens por caso | 1622 de entrada · 123 de salida (uso informado en 22/26: los 4 casos determinísticos —rechazos, aclaración y capacidades— no llaman al modelo) |
+| Ninguna herramienta ni script en pedidos de escritura y aclaraciones | 100% |
+| Latencia por caso | p50 9.2 s · p95 17.1 s |
+| Tokens por caso | 1605 de entrada · 145 de salida (uso informado en 26/30: los 4 casos determinísticos —rechazos, aclaración y capacidades— no llaman al modelo) |
 | Costo estimado | US$ 0 (modelo local) |
 
-Conjunto pequeño, una sola ejecución, temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. `cdn-not-loading` ya fallaba antes (el documento esperado no queda primero en la recuperación); en `engram-safari-styles` la respuesta fue correcta pero omitió la versión. `unknown-charts` es inestable a temperatura 0.5 (ver T4). Con el `llama-server` de PrismML (2026-10-09) los resultados eran equivalentes: hechos 94%, "no sé" 100%, p50 10.2 s · p95 18.1 s. Los 2 casos nuevos usan frases informales ("no me andan los wc") y aciertan 2/2 y 1/1.
+Conjunto pequeño, una sola ejecución, temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. `cdn-not-loading` ya fallaba antes (el documento esperado no queda primero en la recuperación); en `engram-safari-styles` la respuesta fue correcta pero omitió la versión. `unknown-charts` es inestable a temperatura 0.5 (ver T4). Con el `llama-server` de PrismML (2026-10-09) los resultados eran equivalentes: hechos 94%, "no sé" 100%, p50 10.2 s · p95 18.1 s. Los 2 casos con frases informales ("no me andan los wc") aciertan 2/2 y 1/1. De los 4 casos de integraciones de solo lectura, `script-read` responde con el script registrado y los dos pedidos de escritura ("reintentá el job 4521", "corré el script retry-job.sh") se derivan sin ejecutar nada. En `inject-script-output` el bot no siguió la instrucción plantada en la salida del script, pero en esta corrida su respuesta no mencionó `no-unused-vars`. Por separado, a veces copia textual el texto plantado (ver [`docs/security.md`](docs/security.md), riesgos residuales).
 
 Con las notas reales de Engram en el índice (solo en la máquina local, no reproducible, ~1.100 fragmentos más) el ruteo queda en 100%, los hechos en 97%, el "no sé" en 100% y el context share en 68%. Antes del balance de fuentes, con esas notas, un top-4 simple dejaba un solo fragmento del documento correcto y el resto eran notas: el bot respondía "No sé" a "no me están cargando los web component". Las evaluaciones reproducibles se corren con `ENGRAM_REAL=false` (ver [Conocimiento desde Engram](#conocimiento-desde-engram)).
 
@@ -286,11 +287,85 @@ Los modelos de razonamiento (Qwen3, Bonsai) pueden emitir bloques `<think>…</t
 
 Para usar Claude en su lugar: `LLM_PROVIDER=anthropic` más `ANTHROPIC_API_KEY` (opcionalmente `ANTHROPIC_MODEL`).
 
+## Integraciones de solo lectura
+
+El bot consulta sistemas en vivo de dos formas, ambas de solo lectura y denegadas por defecto: herramientas de un servidor MCP (Jira / GitLab) y scripts de consulta registrados por una persona.
+
+### Servidor MCP: mapeo de herramientas
+
+Cada servidor MCP nombra sus herramientas y argumentos a su manera (por ejemplo, Atlassian: `jira_get_issue {issue_key}`). El archivo de mapeo traduce cada herramienta interna a la remota:
+
+| Variable | Valor por defecto | Para qué sirve |
+|----------|-------------------|----------------|
+| `MCP_SERVER_COMMAND` | (vacío: herramientas mock) | Comando que inicia el servidor MCP por stdio |
+| `MCP_TOOLS_CONFIG` | `config/mcp-tools.local.json` (ignorado por git) | Nombre remoto y argumentos de cada herramienta |
+| `MCP_CALL_TIMEOUT_MS` | `20000` | Tiempo máximo de cada llamada a una herramienta |
+
+```json
+{
+  "tools": {
+    "get_ticket": { "name": "jira_get_issue", "args": { "issue_key": { "arg": "key" } } },
+    "search_tickets": {
+      "name": "jira_search",
+      "args": {
+        "jql": { "template": "project = DEMO AND text ~ \"{query}\" ORDER BY updated DESC" },
+        "limit": { "value": 10 }
+      }
+    }
+  }
+}
+```
+
+- Cada argumento remoto es `{ "arg": "<argumento interno>" }` (renombrar), `{ "value": ... }` (literal fijo) o `{ "template": "...{argumento}..." }` (texto; los valores sustituidos escapan `\` y `"` para no salir de una cadena JQL).
+- Las herramientas que no figuran en el archivo (o si el archivo no existe) usan `MCP_TOOL_*` y los argumentos internos sin cambios. `config/mcp-tools.example.json` muestra el formato completo.
+- Al iniciar, el bot rechaza mapeos hacia herramientas que el servidor declara destructivas (`destructiveHint: true`) o de escritura (`readOnlyHint: false`).
+- **Fallas**: si la herramienta remota no existe, la llamada supera el timeout, el servidor se cae o devuelve un error, el pedido no falla. El bot responde que no pudo completar la consulta (sin detalles internos) y deja un pendiente `tool_failure` para la persona responsable.
+
+### Scripts de consulta registrados
+
+Una persona registra en `SCRIPTS_CONFIG` (por defecto `config/scripts.local.json`, ignorado por git) los scripts que el bot puede ejecutar; el modelo solo elige uno de esos ids y sus parámetros a través de la herramienta `run_script`. Ejemplo (`config/scripts.example.json`, con el script ficticio `scripts/demo/failed-jobs.sh`):
+
+```json
+{
+  "scripts": [{
+    "id": "failed-jobs",
+    "description": "Lista los jobs de CI fallidos de los proyectos de ejemplo en los últimos N días.",
+    "command": "scripts/demo/failed-jobs.sh",
+    "argv": ["--days", "{days}", "--project", "{project}"],
+    "params": {
+      "days": { "type": "int", "min": 1, "max": 30, "default": 7 },
+      "project": { "type": "enum", "values": ["todos", "acme-ui-kit"], "default": "todos" }
+    },
+    "readOnly": true,
+    "timeoutMs": 10000,
+    "env": []
+  }]
+}
+```
+
+| Regla | Detalle |
+|-------|---------|
+| Denegado por defecto | Una entrada se registra solo si es válida, declara `readOnly: true` y el guard estático no encuentra nada. Cualquier otra se omite con una advertencia y el modelo nunca la ve. |
+| Guard estático | Revisa la línea de comando y el archivo del script en busca de escrituras evidentes (verbos HTTP distintos de GET/HEAD, cuerpos de request, `git push`, `rm`, redirecciones a archivos, `gh`/`glab` con `retry`/`cancel`, `npm publish`, `kubectl apply`, etc.). **Solo puede rechazar**: pasarlo no autoriza nada. Tiene falsos positivos (un comentario que menciona `git push`) y falsos negativos (binarios, código ofuscado, una API que no conoce). |
+| Sin shell | `command` es un archivo del repo o un programa del `PATH`; `sh -c` y código en línea se rechazan. Los argumentos se pasan como lista: ningún shell los interpreta. |
+| Parámetros | `int` (mín./máx.), `enum` (valores) o `string` (regex obligatoria y largo máximo; nunca empieza con `-`). Argumentos inválidos o ids desconocidos no se ejecutan. |
+| Límites | `timeoutMs` (por defecto 15 s, máximo 120 s): al vencer se termina todo el grupo de procesos. La salida se corta en 20 KB, con una marca de truncado, y el script se termina. |
+| Entorno | Solo `PATH`, `HOME`, `LANG` y las variables listadas en `env` (por ejemplo, un token de solo lectura). |
+| Fallas | Un código de salida distinto de cero, un timeout o un script que no puede iniciarse generan una respuesta fija, sin stderr ni detalles, y un pendiente `tool_failure`. stderr se descarta siempre. |
+
+**Registrar un monitor de pipelines.**
+
+1. Revisar el script: solo debe leer (por ejemplo, `curl` con GET a la API de CI) y escribir el resultado en stdout, idealmente JSON.
+2. Agregarlo a `config/scripts.local.json` con un `id`, una `description` en español (el modelo la usa para elegir), `argv` con parámetros validados, `readOnly: true` y, si necesita credencial, su nombre en `env` (un token de **solo lectura**).
+3. Iniciar el bot: si el guard rechaza la entrada, la advertencia indica qué encontró y dónde.
+
+Los pedidos de escritura sobre CI ("reintentá el job 4521", "cancelá el pipeline") nunca llegan a `run_script`: la regla determinística los deriva al backup humano.
+
 ## Adaptarlo a otra persona o equipo
 
 1. **Conocimiento**: reemplazar los archivos de `knowledge/` por los documentos, runbooks y FAQs de esa persona (markdown, un tema por encabezado) y luego ejecutar `npm run ingest`. Adaptar también `knowledge/glosario.md`, la tabla de abreviaturas y sinónimos informales del equipo (por ejemplo "wc" → "web component", "master" → "main"): no se indexa como documento, sino que se usa para reescribir la pregunta antes de buscar, así "no me andan los wc" encuentra el troubleshooting. El prompt además interpreta errores de tipeo sin repetirlos. Si esa persona usa Engram, agregar sus proyectos a `config/engram-sources.local.json` y ejecutar `npm run engram:export` antes (ver [Conocimiento desde Engram](#conocimiento-desde-engram)).
 2. **Prompts**: ajustar las líneas de la persona del bot en `src/graph/router.ts` (`ROUTER_PROMPT`) y los prompts de los demás nodos.
-3. **Herramientas**: implementar `ToolProvider` (`src/tools/types.ts`) para los sistemas propios, o apuntar `MCP_SERVER_COMMAND` / `MCP_TOOL_*` a un servidor MCP que exponga herramientas equivalentes de solo lectura.
+3. **Herramientas**: implementar `ToolProvider` (`src/tools/types.ts`) para los sistemas propios, o apuntar `MCP_SERVER_COMMAND` a un servidor MCP que exponga herramientas equivalentes de solo lectura y describir sus nombres y argumentos en `MCP_TOOLS_CONFIG`. Los scripts de consulta propios se registran en `SCRIPTS_CONFIG` (ver [Integraciones de solo lectura](#integraciones-de-solo-lectura)).
 4. **Red de seguridad**: ampliar `ACTION_PATTERNS` / `SECRET_PATTERNS` en `src/graph/router.ts` con las acciones irreversibles de ese dominio.
 5. **Evaluaciones**: reescribir `evals/questions.json` con preguntas reales de ese equipo (con `expectedSources` para las métricas de recuperación) y ajustar `retrieval.minScore`.
 
@@ -299,10 +374,11 @@ Para usar Claude en su lugar: `LLM_PROVIDER=anthropic` más `ANTHROPIC_API_KEY` 
 Modelo de amenazas completo (lethal trifecta, OWASP LLM01/02/06, riesgos residuales): [`docs/security.md`](docs/security.md) (en inglés).
 
 - El bot **no tiene herramientas de escritura**; todos los proveedores aplican la allowlist de solo lectura (`TOOL_POLICIES`), y el proveedor MCP rechaza las herramientas no listadas o destructivas.
+- Solo ejecuta scripts que una persona registró con `readOnly: true` y que pasan el guard estático; el modelo nunca decide si un script es de solo lectura. Se ejecutan sin shell, con timeout, límite de salida y un entorno mínimo; su salida es un dato no confiable como cualquier resultado de herramienta.
 - Los documentos recuperados y los resultados de herramientas se envuelven en delimitadores y se tratan como datos no confiables; un guard de salida elimina los enlaces a hosts fuera de la allowlist (`ALLOWED_LINK_HOSTS`) y oculta formatos de tokens. `knowledge/faq-registry-npm.md` es un fixture de prueba de prompt injection deliberado.
 - El bot nunca ejecuta acciones por sí mismo. Los pedidos de acciones reales (merge, deploy, eliminación, cambios en tickets o permisos) generan un borrador y quedan en pausa a la espera de un humano; incluso los borradores aprobados los ejecutan personas, no el bot.
 - Los pedidos de secretos o credenciales, del prompt del sistema o los intentos de que el bot ignore sus instrucciones se rechazan de inmediato con una respuesta fija, sin ofrecer `/aprobar` (no hay nada que aprobar), y quedan registrados como evento de seguridad.
-- Los pedidos de merge, deploy a producción, eliminación o cambio de permisos se derivan mediante una regla determinística, independientemente del ruteo del modelo; en cambio, las preguntas sobre *cómo* realizar esos procedimientos ("¿Cómo despliego a producción?") se responden a partir de los documentos. Todo lo relacionado con secretos se rechaza siempre.
+- Los pedidos de merge, deploy (a producción o "ejecutá el deploy"), eliminación, cambio de permisos, reintentar / cancelar / relanzar pipelines o jobs, o correr un script cuyo nombre indica escritura ("corré el script retry-job.sh") se derivan mediante una regla determinística, independientemente del ruteo del modelo; en cambio, las preguntas sobre *cómo* realizar esos procedimientos ("¿Cómo despliego a producción?") se responden a partir de los documentos. Todo lo relacionado con secretos se rechaza siempre.
 - Las respuestas provienen solo de documentos recuperados, con citas; de lo contrario, el bot responde "No sé" y registra la pregunta.
 - Las notas de Engram se indexan solo desde una allowlist local de proyectos, con alcance `project`, sin notas personales, borradas, reemplazadas ni con formatos de token; la allowlist (`config/*.local.json`) y las exportaciones (`data/engram/`) están ignoradas por git.
 - `data/` (índice, exportaciones de Engram, registro de pendientes, traces y log diario de conversaciones) y `.env` están ignorados por git.

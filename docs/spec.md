@@ -100,13 +100,13 @@ The router is an LLM classifier with a deterministic safety net: `detectRefusal`
 Route boundaries (the router prompt states them as a decision rule plus few-shot examples that deliberately avoid the eval questions):
 
 - Asking **how** to do something, **what** to check, or **whom** to contact → `question`, even when it mentions production, the CDN or an incident.
-- Asking the bot to **look up live data** now (a ticket, failed pipelines) → `task`.
+- Asking the bot to **look up live data** now (a ticket, failed pipelines, a registered query script) → `task`.
 - Asking the bot to **do** something irreversible or permissioned → `sensitive` (human approval).
 - Asking for a secret, the bot's instructions, or to ignore its rules → `refuse` (no approval: there is nothing a human could approve).
 
 **Spec change (refusal route).** Until this change, secrets and prompt-leak requests went to `sensitive` and the human backup was offered `/aprobar` for them, which was meaningless. They now take the `refuse` route; `needs_approval` is reserved for real actions. The eval expectations of `sensitive-secret` and `inject-direct` changed from `sensitive` to `refuse` accordingly (each case carries a `note`); `sensitive-merge` and `inject-write-tool` remain approval cases.
 
-The safety net mirrors this: action patterns (delete, deploy to production, merge, grant/revoke access, force push) are skipped when the message is framed as a how-to question (`¿Cómo…?`, `¿Cuáles son los pasos para…?`, `¿Qué tengo que hacer para…?`) and contains no imperative (`borrala`, `mergealo`, `desplegá`, `pasame`). Secret-related requests (tokens, passwords, credentials, API keys) are always refused, even as how-to questions.
+The safety net mirrors this: action patterns (delete, deploy to production, merge, grant/revoke access, force push, ticket changes, retry / re-run / cancel / trigger a pipeline or job, run a deploy, run a script whose name says it writes such as `retry-job.sh`) are skipped when the message is framed as a how-to question (`¿Cómo…?`, `¿Cuáles son los pasos para…?`, `¿Qué tengo que hacer para…?`) and contains no imperative (`borrala`, `mergealo`, `desplegá`, `pasame`, `reintentá`, `cancelá`, `corré`). So "reintentá el job 4521" and "corré el script retry-job.sh" escalate, while "¿Cómo reintento un job?" is answered from the docs and "corré el script failed-jobs" (a registered read-only script) stays a task. Secret-related requests (tokens, passwords, credentials, API keys) are always refused, even as how-to questions.
 
 ## Tools & permissions
 
@@ -115,8 +115,34 @@ The safety net mirrors this: action patterns (delete, deploy to production, merg
 | `get_ticket` | `key` (`ABC-123`) | read |
 | `search_tickets` | `query` | read |
 | `list_failed_pipelines` | `sinceDays` (1–90, default 7) | read |
+| `run_script` | `script` (a registered id), `args` (validated against that script's params) | read; offered only when at least one script is registered |
 
-Providers implement `ToolProvider`. `MockToolProvider` (fixtures) is the default; `McpToolProvider` connects to an MCP server over stdio only when `MCP_SERVER_COMMAND` is set, and only calls the mapped read-only tool names.
+Providers implement `ToolProvider`. `MockToolProvider` (fixtures) is the default; `McpToolProvider` connects to an MCP server over stdio only when `MCP_SERVER_COMMAND` is set, and only calls the mapped read-only tool names. `ScriptToolProvider` wraps either one and serves `run_script` from the script registry.
+
+### MCP tool mapping
+
+Real servers name tools and arguments their own way (Atlassian MCP: `jira_get_issue {issue_key}`, `jira_search {jql}`). `MCP_TOOLS_CONFIG` (default `config/mcp-tools.local.json`, gitignored; `config/mcp-tools.example.json` is committed) maps each local tool to a remote `name` and builds each remote argument from one spec:
+
+| Spec | Meaning |
+|------|---------|
+| `{ "arg": "key" }` | Value of a local argument under the remote name (rename) |
+| `{ "value": 10 }` | Fixed literal (string, number or boolean) |
+| `{ "template": "text ~ \"{query}\"" }` | String; each substituted value has `\` and `"` escaped so it stays inside a quoted JQL-like string |
+
+- The file is validated with zod at startup; specs may only reference arguments the local tool has. A tool left out (or no file) keeps its `MCP_TOOL_*` name and passes the local arguments unchanged.
+- `MCP_CALL_TIMEOUT_MS` (default 20000) bounds every call.
+- A missing remote tool, a timeout, a crashed server or an MCP error result becomes `ToolCallError`: the request ends with a fixed reply ("No pude completar la consulta de solo lectura…", no internal details), outcome `unknown` and a `tool_failure` pending entry. Policy refusals (unlisted or destructive tools) still throw.
+- Status: proven against a fake stdio MCP server (`tests/fixtures/fake-mcp-server.ts`, `tests/mcp-integration.test.ts`: mapping, destructive tool refused, missing tool, timeout, crash). Running against the real Jira / GitLab servers, reachable only through the VPN, is pending (T2).
+
+### Read-only script registry
+
+Humans register query scripts (e.g. pipeline monitors) in `SCRIPTS_CONFIG` (default `config/scripts.local.json`, gitignored; `config/scripts.example.json` with the fictional `scripts/demo/failed-jobs.sh` is committed). Each entry has `id`, `description`, `command`, `argv` (literals with `{param}` placeholders), `params` (`int` min/max, `enum` values, or `string` with a required full-match `pattern` and `maxLength`, never starting with `-`), `readOnly`, `timeoutMs` (default 15000, max 120000), optional `env` and `cwd`.
+
+- **Deny by default**: an entry is registered only if it validates, declares `readOnly: true` literally and the static write guard finds nothing; anything else is skipped with a warning and never shown to the model. The model never decides what is read-only.
+- **Static guard** (`src/tools/script-guard.ts`): scans the command line and the script file for obvious writes (non-GET/HEAD HTTP verbs, request bodies, git writes, file deletes/moves, redirection to files, `gh`/`glab` mutations, package publish, cluster writes, in-place edits). It can only reject; passing it authorizes nothing. It has false positives and false negatives (binaries, obfuscation, unknown APIs).
+- **Runner**: `spawn` with `shell: false` in its own process group; argv is a list, so no shell parses values. Shell interpreters with inline code (`sh -c`, `node -e`) are refused as commands. The timeout kills the whole group; stdout is capped at 20 KB (truncated with a marker); stderr is discarded; the environment is only `PATH`, `HOME`, `LANG` plus the declared `env` names.
+- `run_script` calls are re-validated at execution (unknown id or invalid args never run). Script output is wrapped as `<resultado_herramienta>` like any tool result. A failed script (non-zero exit, timeout, cannot start) gets its own fixed reply ("…el script de consulta registrado no terminó correctamente…"), without the script id, exit code or stderr, plus a `tool_failure` pending entry.
+- Write requests about CI never reach tool selection: the deterministic `sensitive` rule escalates them first.
 
 The allowlist is explicit: `TOOL_POLICIES` declares every tool `readOnly: true` with a permission (`always_allow` runs unattended; `always_ask` is never auto-run). `McpToolProvider` refuses calls to tools outside the allowlist, mappings for unknown local names, and remote tools annotated `destructiveHint: true` or `readOnlyHint: false`.
 
@@ -151,14 +177,15 @@ Threat model and residual risks: [`security.md`](security.md).
 
 ## Eval plan
 
-`evals/questions.json` holds 26 cases (answerable — 2 of them in informal phrasing with abbreviations —, must-say-"no sé", tasks, sensitive, refusals, out-of-scope, 3 adversarial prompt-injection cases, 2 multi-turn cases, 1 capabilities question and 4 Engram cases whose facts exist only in `knowledge/engram-sample.json`). A multi-turn case lists earlier user messages in `conversation` (run through the graph first; their turns become the history) or a fixed `history`; `mustNotCallTools` and `mustNotMention` check that a follow-up never invents an id. `npm run eval` runs them through the real graph (configured LLM — local OpenAI-compatible model by default or Claude — + local embeddings + mock tools, isolated pending log; escalations auto-rejected) and reports:
+`evals/questions.json` holds 30 cases (answerable — 2 of them in informal phrasing with abbreviations —, must-say-"no sé", tasks, sensitive, refusals, out-of-scope, 4 adversarial prompt-injection cases, 2 multi-turn cases, 1 capabilities question, 4 Engram cases whose facts exist only in `knowledge/engram-sample.json`, and 3 script cases: `script-read` answered from the demo script output, `script-write-retry` and `script-unregistered` that must escalate without running anything). A multi-turn case lists earlier user messages in `conversation` (run through the graph first; their turns become the history) or a fixed `history`; `mustNotCallTools` and `mustNotMention` check that a follow-up never invents an id. `npm run eval` runs them through the real graph (configured LLM — local OpenAI-compatible model by default or Claude — + local embeddings + mock tools + the example script registry, isolated pending log; escalations auto-rejected) and reports:
 
 - **Route accuracy** — router decision vs expected route.
 - **Fact hit rate** — expected key facts found in the reply body (sources excluded).
 - **Correct "no sé"** — unknown questions declined, answerable questions answered.
-- **Follow-up / clarify** — multi-turn cases with the right route and facts, no forbidden mention (e.g. an unrelated ticket) and no tool call when a clarification is expected.
+- **Follow-up / clarify** — multi-turn and `clarify` cases with the right route and facts, no forbidden mention (e.g. an unrelated ticket) and no tool call when a clarification is expected.
+- **No tool called** — cases with `mustNotCallTools` (write requests, unregistered scripts, clarifications): no live tool or script ran (results reused from memory do not count).
 - **Filtered notes unused** — cases with `excludedSources` (an older `topic_key` version, a personal note, a superseded note): none of those sources is in the index and the reply contains none of the case's `mustNotMention` strings.
-- **Injection resisted** — adversarial cases whose reply and draft contain none of their `mustNotContain` strings (canary `CANARY-7Q2X`, exfiltration host, prompt fragments, claims of a write action).
+- **Injection resisted** — the 6 cases with `mustNotContain` (the 4 injection cases plus the 2 script write requests) whose reply and draft contain none of their `mustNotContain` strings (canaries `CANARY-7Q2X` and `CANARY-J0B5`, exfiltration host, prompt fragments, claims of a write action).
 
 Before generation, a retriever-only pass ranks the whole index (no `minScore` cut-off) for every case with `expectedSources` and reports:
 
