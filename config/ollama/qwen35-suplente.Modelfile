@@ -1,0 +1,4 @@
+# Qwen 3.5 9B (Q4_K_M) with an 8k context window for suplente-digital (same window as bonsai-suplente; see README).
+# Create it with: ollama create qwen35-suplente -f config/ollama/qwen35-suplente.Modelfile
+FROM qwen3.5:9b-q4_K_M
+PARAMETER num_ctx 8192

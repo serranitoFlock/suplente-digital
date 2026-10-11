@@ -35,7 +35,7 @@ hours saved per week = Q × R × M / 60
 plus Q × R = 15 fewer interruptions per week for the human backup.
 ```
 
-El costo del modelo está medido, no supuesto: en el conjunto de evaluación, cada pedido que llama al modelo usó en promedio **1622 tokens de entrada + 123 de salida** (Bonsai 27B, local, por lo que el costo es 0). Con un modelo alojado, el costo por pedido ≈ `1622 / 1e6 × input_price + 123 / 1e6 × output_price` (USD por millón de tokens; configurar `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` y el bot lo informa por pedido).
+El costo del modelo está medido, no supuesto: en el conjunto de evaluación, cada pedido que llama al modelo usó en promedio **1599 tokens de entrada + 167 de salida** (Gemma 4 12B, local, por lo que el costo es 0). Con un modelo alojado, el costo por pedido ≈ `1599 / 1e6 × input_price + 167 / 1e6 × output_price` (USD por millón de tokens; configurar `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` y el bot lo informa por pedido).
 
 **Camino de adopción.**
 
@@ -48,7 +48,7 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 
 - La estimación anterior es ilustrativa; la tasa real de resolución depende de qué tan buenos y actualizados estén los documentos. El conjunto de evaluación (30 casos) mide la calidad de las respuestas, no la adopción.
 - Solo cubre las preguntas que los documentos responden, tres consultas de solo lectura y los scripts de consulta que una persona registre; cualquier otra cosa se convierte en un pendiente, no en una respuesta.
-- Un modelo local de 27B tarda ~10 s por pedido (p50 en el conjunto de evaluación); eso es aceptable con acuse de recibo inmediato, pero no para un intercambio conversacional ágil.
+- El modelo local por defecto (Gemma 4 12B) tarda ~11 s por pedido (p50 en el conjunto de evaluación; p95 ~26 s); eso es aceptable con acuse de recibo inmediato, pero no para un intercambio conversacional ágil.
 - Por ahora solo CLI: sin autenticación, sin permisos por usuario, cola en memoria.
 
 ## Mapa de la rúbrica
@@ -66,24 +66,35 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 
 ## Resultados de la evaluación
 
-`npm run eval -- --repeat 3` con PrismML Bonsai 27B (1-bit `Q1_0`, servido por Ollama 0.40.3 como `bonsai-suplente`, contexto de 8k, con `reasoning_effort: "none"`), 30 casos × 3 repeticiones (90 corridas), ejecutado el 2026-10-11 con un índice reproducible (`ENGRAM_REAL=false`: `knowledge/*.md` + la muestra ficticia de Engram):
+`npm run eval -- --repeat 3` con Gemma 4 12B (`gemma4:12b-it-qat`, servido por Ollama 0.40.3 como `gemma4-suplente`, contexto de 8k, con `reasoning_effort: "none"`), 30 casos × 3 repeticiones (90 corridas), ejecutado el 2026-10-11 con un índice reproducible (`ENGRAM_REAL=false`: `knowledge/*.md` + la muestra ficticia de Engram):
 
 | Métrica | Resultado |
 |--------|--------|
+| Corridas en las que pasan todos los chequeos | 99% (89/90; `engram-safari-styles` 2/3) |
 | Recall@1 / recall@4 / MRR de recuperación (14 casos con `expectedSources`) | 93% / 100% / 0.964 |
 | Context share (fragmentos enviados al modelo que vienen de la fuente esperada) | 82% |
 | Precisión de ruteo | 100% (90/90) |
-| Tasa de aciertos de hechos | 91% |
-| "No sé" correcto | 96% |
-| Inyecciones resistidas (4 inyecciones + 2 pedidos de escritura sobre CI) | 94% (17/18) |
+| Tasa de aciertos de hechos | 99% |
+| "No sé" correcto | 100% |
+| Inyecciones resistidas (4 inyecciones + 2 pedidos de escritura sobre CI) | 100% (18/18) |
 | Notas de Engram filtradas sin usar (1 caso) | 100% |
-| Seguimiento / aclaración (2 casos multi-turno) | 83% (5/6) |
+| Seguimiento / aclaración (2 casos multi-turno) | 100% (6/6) |
 | Ninguna herramienta ni script en pedidos de escritura y aclaraciones | 100% |
-| Latencia por caso | p50 7.1 s · p95 17.7 s |
-| Tokens por caso | 1592 de entrada · 141 de salida (uso informado en 78/90: los casos determinísticos —rechazos, aclaración y capacidades— no llaman al modelo) |
+| Latencia por caso | p50 10.9 s · p95 26.2 s |
+| Tokens por caso | 1599 de entrada · 167 de salida (uso informado en 78/90: los casos determinísticos —rechazos, aclaración y capacidades— no llaman al modelo) |
 | Costo estimado | US$ 0 (modelo local) |
 
-Conjunto pequeño a temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. Medir con repeticiones (`--repeat N`, `--only <ids>`) es lo que permite distinguir un arreglo del ruido. Así quedaron los tres casos que antes alternaban entre corridas (T4, 5 repeticiones cada uno):
+**Comparación de modelos locales** (misma evaluación, 30 casos × 3, Mac M3 Pro con 18 GB, presupuesto de ~8–9 GB para el modelo):
+
+| Modelo | Corridas sin fallas | Hechos | `cdn-not-loading` | Latencia p50 / p95 | Memoria reservada por Ollama | Memoria libre mínima del sistema |
+|--------|--------------------|--------|-------------------|--------------------|------------------------------|---------------------------------|
+| **Gemma 4 12B QAT** (`gemma4-suplente`, por defecto) | **89/90** | **99%** | **3/3** | 10.9 s / 26.2 s | 7.4 GB | 13% |
+| Qwen 3.5 9B Q4_K_M (`qwen35-suplente`) | 87/90 | 98% | 2/3 | 7.6 s / 31.3 s | 6.0 GB | 27% |
+| PrismML Bonsai 27B 1-bit (`bonsai-suplente`) | 84/90 | 94% | 0/3 | 6.4 s / 19.7 s | 4.7 GB | 17% |
+
+Los tres quedan en 100% en ruteo, "No sé", inyecciones y ningún uso de herramientas en pedidos de escritura: esas garantías son determinísticas y no dependen del modelo. Gemma es el único que responde bien a "¿qué reviso primero?" en `cdn-not-loading` (el paso 1 del checklist) y se eligió por calidad; a cambio es el más lento y el que deja menos memoria libre. La memoria por proceso (`footprint`) no sirve para comparar modelos porque no cuenta de forma consistente la memoria de GPU; por eso se informa lo que reserva Ollama (`ollama ps`: pesos + caché del contexto) y la memoria libre del sistema durante la corrida.
+
+Conjunto pequeño a temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. Medir con repeticiones (`--repeat N`, `--only <ids>`) es lo que permite distinguir un arreglo del ruido. Así quedaron, con Bonsai, los tres casos que antes alternaban entre corridas (T4, 5 repeticiones cada uno):
 
 | Caso | Antes | Después | Qué cambió |
 |------|-------|---------|------------|
@@ -284,6 +295,16 @@ ollama pull qwen3:8b
 ollama serve                  # if it is not already running
 # .env: LLM_MODEL=qwen3:8b
 ```
+
+**Modelo recomendado: Gemma 4 12B** (el de mejor calidad en la [comparación de modelos](#resultados-de-la-evaluación); ~7.4 GB reservados con contexto de 8k):
+
+```bash
+ollama pull gemma4:12b-it-qat
+ollama create gemma4-suplente -f config/ollama/gemma4-suplente.Modelfile   # 8k context
+# .env: LLM_MODEL=gemma4-suplente
+```
+
+Con menos memoria disponible, `qwen3.5:9b-q4_K_M` (`config/ollama/qwen35-suplente.Modelfile`, ~6 GB) es la alternativa intermedia, y Bonsai (abajo) la más liviana y rápida.
 
 **PrismML Bonsai 27B (1-bit)**: temperatura recomendada 0.5 (el valor por defecto de `LLM_TEMPERATURE`):
 

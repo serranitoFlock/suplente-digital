@@ -1,0 +1,4 @@
+# Gemma 4 12B (QAT 4-bit) with an 8k context window for suplente-digital (same window as bonsai-suplente; see README).
+# Create it with: ollama create gemma4-suplente -f config/ollama/gemma4-suplente.Modelfile
+FROM gemma4:12b-it-qat
+PARAMETER num_ctx 8192
