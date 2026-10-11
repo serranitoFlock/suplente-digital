@@ -23,7 +23,8 @@ export const MEMORY_SCHEMA: SchemaModule = {
 export class SqliteConversationMemory implements ConversationMemory {
   constructor(
     readonly db: DatabaseSync,
-    readonly maxTurns = DEFAULT_MEMORY_TURNS,
+    /** Mutable so the admin panel can change it at runtime; applies from the next read/append. */
+    public maxTurns = DEFAULT_MEMORY_TURNS,
   ) {
     applyMigrations(db, MEMORY_SCHEMA);
   }

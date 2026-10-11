@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { AppConfig } from "../config.js";
-import { DEFAULT_CALL_TIMEOUT_MS, loadMcpToolsConfig, mapToolArgs, resolveToolMappings, type ToolMapping } from "./mcp-config.js";
+import { DEFAULT_CALL_TIMEOUT_MS, loadMcpToolsConfig, mapToolArgs, resolveToolMappings, type McpToolsConfig, type ToolMapping } from "./mcp-config.js";
 import { MockToolProvider } from "./mock-provider.js";
 import { withScripts } from "./script-provider.js";
 import { loadScriptRegistry } from "./scripts.js";
@@ -144,6 +144,23 @@ export class McpToolProvider implements ToolProvider {
   }
 }
 
+/** The MCP side of the tools, as resolved by the runtime configuration (panel > env/files > defaults). */
+export interface BaseToolSettings {
+  command: string | null | undefined;
+  args: readonly string[];
+  /** `MCP_TOOL_*` names, used for every tool the mapping leaves out. */
+  toolNames: Record<ToolName, string>;
+  mapping: McpToolsConfig | null | undefined;
+  callTimeoutMs: number;
+}
+
+/** MCP when a server command is configured, otherwise the credential-free mock (no `run_script`). */
+export async function createBaseToolProvider(settings: BaseToolSettings): Promise<ToolProvider> {
+  if (!settings.command) return new MockToolProvider();
+  const mappings = resolveToolMappings({ ...settings.toolNames }, settings.mapping ?? undefined);
+  return McpToolProvider.connect(settings.command, [...settings.args], mappings, { timeoutMs: settings.callTimeoutMs });
+}
+
 /**
  * Uses MCP when MCP_SERVER_COMMAND is configured, otherwise the credential-free mock.
  * Tool names and arguments come from the optional mapping file (`MCP_TOOLS_CONFIG`), else from `MCP_TOOL_*`.
@@ -152,11 +169,7 @@ export class McpToolProvider implements ToolProvider {
  */
 export async function createToolProvider(mcp: AppConfig["mcp"], scripts?: AppConfig["scripts"]): Promise<ToolProvider> {
   const registry = scripts ? await loadScriptRegistry(scripts.configPath, scripts.root) : undefined;
-  let base: ToolProvider;
-  if (!mcp.command) base = new MockToolProvider();
-  else {
-    const mappings = resolveToolMappings({ ...mcp.toolNames }, await loadMcpToolsConfig(mcp.toolsConfigPath));
-    base = await McpToolProvider.connect(mcp.command, [...mcp.args], mappings, { timeoutMs: mcp.callTimeoutMs });
-  }
+  const mapping = mcp.command ? await loadMcpToolsConfig(mcp.toolsConfigPath) : undefined;
+  const base = await createBaseToolProvider({ command: mcp.command, args: mcp.args, toolNames: mcp.toolNames, mapping, callTimeoutMs: mcp.callTimeoutMs });
   return registry ? withScripts(base, registry) : base;
 }

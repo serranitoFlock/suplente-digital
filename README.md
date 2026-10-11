@@ -244,6 +244,12 @@ El servidor no arranca si falta un token, si tiene menos de 24 caracteres o si l
 | `GET` | `/v1/pending` | admin | 200 `{ entries }` (registro de pendientes) |
 | `GET` | `/v1/pending/summary` | admin | 200 `{ total, topics }`: los pendientes agrupados por tema, con conteos por motivo, las preguntas sin respuesta, escalaciones (con decisión y nota), fallas de herramientas, rechazos de seguridad y el doc sugerido (`knowledge/<tema>.md`) |
 | `GET` | `/v1/events` | cliente (con `?requester=`), admin | 200 `text/event-stream` |
+| `GET` | `/v1/config` | admin | 200 configuración efectiva: valor y origen (`panel`, `env`, `default`) de cada campo; los secretos solo como `{ set, source }` |
+| `PUT` | `/v1/config` | admin | 200 `{ applied, restartRequired, config }` (parche parcial; `null` vuelve al valor de `.env`); 422 sin guardar nada |
+| `PUT` / `DELETE` | `/v1/config/secrets/anthropic-api-key` | admin | 200 (la clave nunca se devuelve); 422 |
+| `POST` | `/v1/config/llm/test` | admin | 200 `{ ok, latencyMs, model, error? }`: una respuesta mínima del modelo |
+| `GET` | `/v1/config/models` | admin | 200 `{ models, reason? }`: modelos del servidor local (solo `localhost`) |
+| `GET` | `/v1/config/audit` | admin | 200 `{ entries }`: cambios recientes (secretos enmascarados) |
 
 Autenticación con `Authorization: Bearer <token>`: sin token o con uno inválido → 401; token de cliente en una ruta de admin → 403. Los errores son `{ "error": { "code", "message" } }` (las validaciones agregan `issues` con la ruta de cada campo), sin trazas ni detalles internos. Cuerpo JSON de hasta 16 KB; `text` de 1 a 4000 caracteres, `requester` de hasta 200.
 
@@ -280,6 +286,8 @@ curl -N "$API/v1/events?requester=ana" -H "Authorization: Bearer $CLIENT"
 | `failed` | `id`, `requester`, `question`, `message` amigable | `error` técnico |
 
 Con el token de admin, `GET /v1/events` recibe los eventos de todos (o de uno, con `?requester=`). Cada pedido escribe una línea en stderr (método, ruta, estado, ms), sin tokens ni query string. `Ctrl+C` / `SIGTERM` deja de aceptar pedidos, espera las consultas en curso y cierra todo.
+
+**Configuración desde el panel.** Algunos valores se pueden cambiar en caliente desde el panel (o con `PUT /v1/config`): modelo y proveedor (`LLM_*`, `ANTHROPIC_*`), turnos de memoria, citas, el registro de scripts y la configuración MCP. Se guardan en la tabla `settings` de la misma base SQLite y tienen prioridad sobre `.env`, que queda como valor por defecto (con la tabla vacía todo funciona igual que antes). El modelo, la memoria, las citas y los scripts se aplican sin reiniciar; los cambios de MCP se guardan y piden reinicio. Cada cambio se valida con las mismas reglas que `.env` (un script sin `readOnly: true` o marcado por la guarda de escritura rechaza el cambio entero) y queda en una auditoría. La clave de Anthropic cargada desde el panel nunca se devuelve, pero queda en el archivo de la base: protegelo como `.env`. Detalle en [`docs/spec.md`](docs/spec.md#runtime-configuration) y [`docs/security.md`](docs/security.md#runtime-configuration-surface).
 
 ## Panel de administración
 

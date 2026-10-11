@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { z } from "zod";
 import type { PendingEntry } from "../pending/store.js";
+import { ConfigValidationError, type RuntimeConfig } from "../runtime-config.js";
 import type { AssistantEvents, AssistantService, DecisionResult } from "../service/assistant-service.js";
 import { createAuthenticator, type ApiTokens, type Scope } from "./auth.js";
 import { doneForScope, failedForScope, jobForScope, needsApprovalForScope, pendingSummaryView } from "./views.js";
@@ -8,15 +9,23 @@ import { doneForScope, failedForScope, jobForScope, needsApprovalForScope, pendi
 /**
  * HTTP API over `AssistantService` (`node:http`, JSON in/out). Two bearer scopes: `client` (a requester-facing
  * adapter such as Teams: submit, own job status, own events) and `admin` (the human backup: everything, plus
- * approve/reject, every job and the pending log and its summary). Errors are `{ error: { code, message } }` without internals.
+ * approve/reject, every job and the pending log and its summary, and the runtime configuration). Errors are
+ * `{ error: { code, message } }` without internals.
  */
+
+/** The runtime configuration operations the admin endpoints use (implemented by `RuntimeConfig`). */
+export type ConfigAdmin = Pick<RuntimeConfig, "view" | "update" | "setAnthropicApiKey" | "testLlm" | "listModels" | "audit">;
 
 export interface ApiServerOptions {
   service: AssistantService;
   pending: { list(): Promise<PendingEntry[]> };
   tokens: ApiTokens;
+  /** Runtime configuration (`/v1/config*`, admin only); without it those endpoints answer 404. */
+  config?: ConfigAdmin;
   /** Max request body in bytes (default 16 KB). */
   bodyLimitBytes?: number;
+  /** Max body of `PUT /v1/config`, which can carry a script registry (default 256 KB). */
+  configBodyLimitBytes?: number;
   /** SSE heartbeat comment interval (default 15 s). */
   heartbeatMs?: number;
   /** One line per request (method, path, status, ms); default stderr. Never receives tokens or query strings. */
@@ -33,6 +42,9 @@ const decisionSchema = z.object({ note: z.string().trim().max(MAX_TEXT).optional
 const requesterQuery = z.object({ requester: requesterSchema });
 const optionalRequesterQuery = z.object({ requester: requesterSchema.optional() });
 const listQuery = z.object({ status: z.enum(JOB_STATUSES).optional() });
+const secretBody = z.object({ value: z.string().trim().min(1).max(1000) });
+const llmTestBody = z.object({ overrides: z.unknown().optional() });
+const auditQuery = z.object({ limit: z.coerce.number().int().min(1).max(500).default(50) });
 
 class HttpError extends Error {
   constructor(
@@ -75,10 +87,11 @@ interface Route {
 }
 
 export function createApiServer(options: ApiServerOptions): Server {
-  const { service, pending, bodyLimitBytes = 16 * 1024, heartbeatMs = 15_000, log = (line) => process.stderr.write(`${line}\n`) } = options;
+  const { service, pending, bodyLimitBytes: defaultBodyLimit = 16 * 1024, heartbeatMs = 15_000, log = (line) => process.stderr.write(`${line}\n`) } = options;
+  const { configBodyLimitBytes = 256 * 1024 } = options;
   const authenticate = createAuthenticator(options.tokens);
 
-  const readJson = async (req: IncomingMessage): Promise<unknown> => {
+  const readJson = async (req: IncomingMessage, bodyLimitBytes = defaultBodyLimit): Promise<unknown> => {
     const declared = Number(req.headers["content-length"] ?? NaN);
     if (declared > bodyLimitBytes) throw new HttpError(413, "payload_too_large", `The body exceeds ${bodyLimitBytes} bytes.`);
     const chunks: Buffer[] = [];
@@ -146,7 +159,73 @@ export function createApiServer(options: ApiServerOptions): Server {
     });
   };
 
+  /** The runtime configuration, or 404 when this server was built without one. */
+  const runtime = (): ConfigAdmin => {
+    if (!options.config) throw notFound();
+    return options.config;
+  };
+
+  /** Runs a configuration change; a rejected change is a 422 with the issue paths (nothing was stored). */
+  const configChange = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof ConfigValidationError) throw validationError(error.issues.map((issue) => ({ path: issue.path.split("."), message: issue.message })));
+      throw error;
+    }
+  };
+
+  const configRoutes: Route[] = [
+    {
+      pattern: /^\/v1\/config$/,
+      methods: {
+        GET: { scope: "admin", handle: ({ res }) => send(res, 200, runtime().view()) },
+        PUT: {
+          scope: "admin",
+          handle: async (ctx) => {
+            const config = runtime();
+            const patch = await readJson(ctx.req, configBodyLimitBytes);
+            send(ctx.res, 200, await configChange(() => config.update(patch)));
+          },
+        },
+      },
+    },
+    {
+      pattern: /^\/v1\/config\/secrets\/anthropic-api-key$/,
+      methods: {
+        PUT: {
+          scope: "admin",
+          handle: async (ctx) => {
+            const config = runtime();
+            const { value } = parse(secretBody, await readJson(ctx.req));
+            send(ctx.res, 200, await configChange(() => config.setAnthropicApiKey(value)));
+          },
+        },
+        DELETE: { scope: "admin", handle: async ({ res }) => send(res, 200, await configChange(() => runtime().setAnthropicApiKey(null))) },
+      },
+    },
+    {
+      pattern: /^\/v1\/config\/llm\/test$/,
+      methods: {
+        POST: {
+          scope: "admin",
+          handle: async (ctx) => {
+            const config = runtime();
+            const { overrides } = parse(llmTestBody, await readJson(ctx.req));
+            send(ctx.res, 200, await configChange(() => config.testLlm(overrides ?? {})));
+          },
+        },
+      },
+    },
+    { pattern: /^\/v1\/config\/models$/, methods: { GET: { scope: "admin", handle: async ({ res }) => send(res, 200, await runtime().listModels()) } } },
+    {
+      pattern: /^\/v1\/config\/audit$/,
+      methods: { GET: { scope: "admin", handle: (ctx) => send(ctx.res, 200, { entries: runtime().audit(parse(auditQuery, ctx.query).limit) }) } },
+    },
+  ];
+
   const routes: Route[] = [
+    ...configRoutes,
     { pattern: /^\/health$/, methods: { GET: { scope: "public", handle: ({ res }) => send(res, 200, { status: "ok" }) } } },
     {
       pattern: /^\/v1\/jobs$/,

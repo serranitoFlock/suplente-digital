@@ -12,7 +12,7 @@ async function main(): Promise<void> {
   const assistant = await createAssistant();
   const { service } = assistant;
   // No interactive listeners: the API streams events to its own subscribers (`GET /v1/events`).
-  const server = createApiServer({ service, pending: assistant.pending, tokens: api.tokens });
+  const server = createApiServer({ service, pending: assistant.pending, tokens: api.tokens, config: assistant.runtime });
 
   const { pending, requeued, rerun, resumed } = service.recover();
   console.error(`Suplente digital API (${assistant.description}).`);

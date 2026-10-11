@@ -7,7 +7,8 @@ import { withSpan, type Attributes } from "./observability/tracing.js";
 export type Llm = (system: string, user: string) => Promise<string>;
 
 export type LlmSettings =
-  | { provider: "anthropic"; model: string }
+  /** `apiKey`: set when the key comes from the admin panel; otherwise the client reads `ANTHROPIC_API_KEY`. */
+  | { provider: "anthropic"; model: string; apiKey?: string }
   | {
       provider: "openai-compatible";
       model: string;
@@ -17,10 +18,10 @@ export type LlmSettings =
       disableThinking: boolean;
     };
 
-const DEFAULT_BASE_URL = "http://localhost:11434/v1";
-const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5";
+export const DEFAULT_BASE_URL = "http://localhost:11434/v1";
+export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5";
 /** Bonsai's recommended sampling temperature; also a sensible default for small local models. */
-const DEFAULT_TEMPERATURE = 0.5;
+export const DEFAULT_TEMPERATURE = 0.5;
 
 /** Resolves the LLM provider settings from environment variables. Throws a readable error on bad config. */
 export function resolveLlmSettings(env: Record<string, string | undefined>): LlmSettings {
@@ -112,11 +113,30 @@ function hostOf(url: string): string | undefined {
 }
 
 export function createLlm(settings: LlmSettings): Llm {
-  return settings.provider === "anthropic" ? createClaudeLlm(settings.model) : createOpenAiCompatibleLlm(settings);
+  return settings.provider === "anthropic" ? createClaudeLlm(settings.model, settings.apiKey) : createOpenAiCompatibleLlm(settings);
 }
 
-export function createClaudeLlm(model: string): Llm {
-  const chat = new ChatAnthropic({ model, maxTokens: 4096, outputConfig: { effort: "low" } });
+/**
+ * A model that can be replaced while the process runs (admin panel changes). Each call goes to the model that is
+ * current when the call starts: a job already running keeps going, and its later calls use the new model.
+ */
+export class SwitchableLlm {
+  #current: Llm;
+
+  constructor(initial: Llm) {
+    this.#current = initial;
+  }
+
+  /** Stable function to hand to the graph. */
+  readonly call: Llm = (system, user) => this.#current(system, user);
+
+  set(llm: Llm): void {
+    this.#current = llm;
+  }
+}
+
+export function createClaudeLlm(model: string, apiKey?: string): Llm {
+  const chat = new ChatAnthropic({ model, maxTokens: 4096, outputConfig: { effort: "low" }, ...(apiKey ? { apiKey } : {}) });
   return tracedLlm({ provider: "anthropic", model }, async (system, user) => {
     const response = await chat.invoke([new SystemMessage(system), new HumanMessage(user)]);
     return { text: response.text, usage: usageOf(response) };

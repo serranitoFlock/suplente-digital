@@ -130,6 +130,25 @@ What remains open:
 - **No rate limiting or token rotation.** A leaked client token lets someone queue work (and spend model time) until it is changed and the server restarted.
 - **Single process per database.** Running the CLI and the server on the same `ASSISTANT_DB_PATH` at once breaks the single-owner assumption of the job queue and recovery.
 
+## Runtime configuration surface
+
+`/v1/config*` (`src/runtime-config.ts`, `src/persistence/settings-store.ts`) lets the admin scope change settings at runtime. Unlike the rest of the API this is a real capability: it can change the model, the MCP server command (used after a restart) and the script registry.
+
+| Control | Detail | Where |
+|---------|--------|-------|
+| Admin only | Every `/v1/config*` route needs the admin token (client → 403); the CLI has no endpoint and only reads the stored values at startup | `src/http/server.ts` |
+| Secrets write-only | `ANTHROPIC_API_KEY` set from the panel is stored in the `settings` table but never returned: reads expose `{ set, source, updatedAt }`, `PUT` answers without it, the audit records `"***"`, LLM test errors are scrubbed of it and the request log has no bodies | `src/runtime-config.ts`, `src/persistence/settings-store.ts` |
+| Audit | Append-only `settings_audit` (key, masked old/new value, time, actor `admin`), `GET /v1/config/audit` | `src/persistence/settings-store.ts` |
+| Validation before storage | Strict zod patch plus the existing resolvers; a failing check stores nothing (`422` with paths) | `src/runtime-config.ts` |
+| Script guard still applies | A registry from the panel goes through `buildScriptRegistry`: every entry must declare `readOnly: true` literally and pass the static write guard, or the whole change is refused; commands still resolve inside the repo | `src/tools/scripts.ts` |
+| No arbitrary URL fetching | `GET /v1/config/models` only queries the configured base URL, only on `localhost` / `127.0.0.1` / `::1`, without redirects; the request cannot supply a URL | `src/runtime-config.ts` |
+
+What remains open:
+
+- **The database file now holds a secret.** Protect `ASSISTANT_DB_PATH` (and its `-wal` / `-shm` files and backups) like `.env`: file permissions, no commits, no sharing.
+- **The admin token can change what runs.** It can point the bot to another model server (`llm.baseUrl`, also used by `POST /v1/config/llm/test`) or set the MCP server command started at the next restart. Treat the admin token like a deploy credential.
+- **Shared identity in the audit.** The actor is always `admin` until per-human login exists.
+
 ## Admin panel (`admin/`)
 
 The Angular panel (T20, [`admin/README.md`](../admin/README.md)) is a client of the admin scope above; it adds no API capability.

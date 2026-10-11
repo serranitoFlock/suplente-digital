@@ -1,11 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import { JOB_SCHEMA, SqliteJobStore } from "./job-store.js";
 import { CHECKPOINT_SCHEMA, SqliteCheckpointSaver } from "./sqlite-checkpointer.js";
+import { SETTINGS_SCHEMA } from "./settings-store.js";
 import { MEMORY_SCHEMA, SqliteConversationMemory } from "./sqlite-memory.js";
 import { openDatabase, type SchemaModule } from "./sqlite.js";
 
-/** Every schema module the assistant keeps in its database (checkpoints, jobs, conversation memory). */
-export const ASSISTANT_SCHEMAS: readonly SchemaModule[] = [CHECKPOINT_SCHEMA, JOB_SCHEMA, MEMORY_SCHEMA];
+/** Every schema module the assistant keeps in its database (checkpoints, jobs, conversation memory, runtime settings). */
+export const ASSISTANT_SCHEMAS: readonly SchemaModule[] = [CHECKPOINT_SCHEMA, JOB_SCHEMA, MEMORY_SCHEMA, SETTINGS_SCHEMA];
 
 /** The assistant's persistent state, all on one SQLite connection owned by the caller. */
 export interface AssistantStores {

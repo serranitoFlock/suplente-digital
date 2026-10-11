@@ -113,24 +113,36 @@ export interface ScriptProviderOptions extends RunScriptOptions {
  */
 export class ScriptToolProvider implements ToolProvider {
   readonly name: string;
+  #registry: ScriptRegistry;
 
   constructor(
     private readonly base: ToolProvider,
-    readonly scripts: ScriptRegistry,
+    registry: ScriptRegistry,
     private readonly options: ScriptProviderOptions = {},
   ) {
     this.name = base.name;
+    this.#registry = registry;
+  }
+
+  get scripts(): ScriptRegistry {
+    return this.#registry;
+  }
+
+  /** Replaces the registry (admin panel change); calls that already resolved their script keep it. */
+  reload(registry: ScriptRegistry): void {
+    this.#registry = registry;
   }
 
   async call(call: ToolCall): Promise<string> {
     if (call.tool !== SCRIPT_TOOL) return this.base.call(call);
-    const resolved = this.scripts.resolve(call.args);
-    const script = resolved && this.scripts.get(resolved.script);
+    const registry = this.#registry;
+    const resolved = registry.resolve(call.args);
+    const script = resolved && registry.get(resolved.script);
     if (!resolved || !script) {
       throw new ToolNotAllowedError(`${SCRIPT_TOOL} ${JSON.stringify(call.args.script)}`, "is not a registered read-only script or its arguments are invalid");
     }
     const execute = this.options.execute ?? runScript;
-    return execute(script, this.scripts.argv(script, resolved.args as Record<string, string | number>), { maxOutputBytes: this.options.maxOutputBytes });
+    return execute(script, registry.argv(script, resolved.args as Record<string, string | number>), { maxOutputBytes: this.options.maxOutputBytes });
   }
 
   async close(): Promise<void> {
@@ -141,4 +153,12 @@ export class ScriptToolProvider implements ToolProvider {
 /** Adds `run_script` to a provider only when at least one script is registered. */
 export function withScripts(base: ToolProvider, registry: ScriptRegistry, options: ScriptProviderOptions = {}): ToolProvider {
   return registry.size > 0 ? new ScriptToolProvider(base, registry, options) : base;
+}
+
+/**
+ * Always serves `run_script` from a registry that can be replaced later (`reload`), even while it is empty: an empty
+ * registry offers no script to the model and refuses every `run_script` call.
+ */
+export function withReloadableScripts(base: ToolProvider, registry: ScriptRegistry, options: ScriptProviderOptions = {}): ScriptToolProvider {
+  return new ScriptToolProvider(base, registry, options);
 }

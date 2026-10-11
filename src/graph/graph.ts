@@ -19,7 +19,10 @@ function traced<S, U>(name: string, node: (state: S) => U | Promise<U>): (state:
 function tracedTools(tools: ToolProvider): ToolProvider {
   return {
     name: tools.name,
-    scripts: tools.scripts,
+    // A getter, so a reloaded script registry (admin panel) is seen by the next tool selection.
+    get scripts() {
+      return tools.scripts;
+    },
     call: (call) =>
       withSpan(
         `execute_tool ${call.tool}`,

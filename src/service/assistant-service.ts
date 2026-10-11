@@ -151,7 +151,7 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
   readonly #queue: JobQueue;
   readonly #threadPrefix: string;
   readonly #memory: ConversationMemory;
-  readonly #showCitations: boolean;
+  #showCitations: boolean;
   readonly #log: ConversationLogSink | undefined;
   readonly #jobs: JobStore;
   /** Last scheduled step per conversation: requests from the same requester run in order. */
@@ -172,6 +172,11 @@ export class AssistantService extends EventEmitter<AssistantEvents> {
   }
 
   /** Accepts a request and returns its acknowledgement immediately; the work runs in the background. */
+  /** Changes whether replies show citations (admin panel); applies to every job that finishes afterwards. */
+  setShowCitations(value: boolean): void {
+    this.#showCitations = value;
+  }
+
   submit(text: string, { requester }: { requester?: string } = {}): { id: number; ack: string } {
     const now = new Date().toISOString();
     // The job is committed before it is scheduled, so a restart finds it.

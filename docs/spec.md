@@ -70,12 +70,42 @@ Keep a frontend architecture team unblocked while its owner is away: answer freq
 | GET | `/v1/pending` | admin | — | 200 `{ entries }` (pending log) | — |
 | GET | `/v1/pending/summary` | admin | — | 200 `{ total, topics: [{ topic, count, counts: { unknown, unsupported_task, escalated, security_refusal, tool_failure }, suggestedDoc?, unanswered: [{ id, createdAt, question, reason }], escalations: [{ id, createdAt, question, decision?, note? }], toolFailures, securityRefusals }] }` (pending log grouped by topic, most entries first; `suggestedDoc` is `knowledge/<topic>.md` when the bot had no answer; no drafts) | — |
 | GET | `/v1/events` | client, admin | client: `?requester=` (required); admin: optional filter | 200 `text/event-stream` | 422 |
+| GET | `/v1/config` | admin | — | 200 config view (see [Runtime configuration](#runtime-configuration)) | — |
+| PUT | `/v1/config` | admin | partial patch `{ llm?, assistant?, mcp?, scripts? }`; `null` resets a key; body ≤ 256 KB | 200 `{ applied, restartRequired, config }` | 413, 415, 422 (nothing stored) |
+| PUT | `/v1/config/secrets/anthropic-api-key` | admin | `{ value: 1..1000 }` | 200 `{ applied, restartRequired, config }` (value never echoed) | 422 |
+| DELETE | `/v1/config/secrets/anthropic-api-key` | admin | — | same | 422 when the effective provider would be left without a key |
+| POST | `/v1/config/llm/test` | admin | `{ overrides?: { provider?, baseUrl?, model?, temperature?, disableThinking?, anthropicModel? } }` | 200 `{ ok: true, latencyMs, model }` or `{ ok: false, latencyMs, model, error }` (20 s bound) | 422 |
+| GET | `/v1/config/models` | admin | — (never a URL) | 200 `{ models: string[], reason? }` | — |
+| GET | `/v1/config/audit` | admin | `?limit=1..500` (default 50) | 200 `{ entries: [{ id, key, oldValue, newValue, changedAt, actor }] }` newest first, secrets as `"***"` | 422 |
 
 - Requester isolation: the client scope sees only jobs and events whose `requester` equals the one it names; any other job answers 404 (existence is not leaked). The adapter holding the client token is trusted to set `requester` to the real sender.
 - Job view: admin gets the full `JobView` (including `route`, `draft`, `error`); client gets `id`, `question`, `requester`, `status`, `createdAt`, `updatedAt` and `answer` when done.
 - SSE: frames `event: <name>` + `data: <json>`; a `: connected` comment on open and `: ping` every 15 s; listeners are removed when the client disconnects. Payloads: `done` `{ id, requester, question, answer }` (+ `route` for admin); `needs_approval` `{ id, requester, question }` (+ `draft` for admin); `failed` `{ id, requester, question, message }` (+ `error` for admin).
 - Logging: one stderr line per request (`METHOD /path STATUS Nms`), without query strings or tokens.
 - Shutdown (`SIGINT` / `SIGTERM`): stop accepting connections, wait for `service.idle()`, close open event streams, then tools, traces and the database.
+
+## Runtime configuration
+
+Some settings can be changed from the admin panel while the process runs (`src/runtime-config.ts`, `src/persistence/settings-store.ts`). They live in the `settings` table of the same SQLite database (key → JSON value, `updated_at`), with an append-only `settings_audit` (key, old/new value, `changed_at`, actor `admin`; secrets as `"***"`).
+
+**Precedence per field:** panel value (settings table) > `.env` / config files > built-in default. With an empty settings table the result is exactly what `.env` resolves (the CLI and `npm run serve` read the table at startup). Each field reports its `source`: `panel`, `env` (an environment variable, or `MCP_TOOLS_CONFIG` / `SCRIPTS_CONFIG` for the mapping and the registry) or `default`.
+
+| Key | Env layer | Applied |
+|-----|-----------|---------|
+| `llm.provider` (`openai-compatible` \| `anthropic`), `llm.baseUrl`, `llm.model`, `llm.temperature` (0–2), `llm.disableThinking`, `llm.anthropicModel` | `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_DISABLE_THINKING`, `ANTHROPIC_MODEL` | hot: the next model call uses the new model |
+| `llm.anthropicApiKey` (secret, own endpoint) | `ANTHROPIC_API_KEY` | hot |
+| `assistant.memoryTurns` (0–50) | `MEMORY_TURNS` | hot: next memory read/append |
+| `assistant.showCitations` | `SHOW_CITATIONS` | hot: jobs that finish afterwards |
+| `scripts.registry` (same document as `config/scripts.*.json`) | `SCRIPTS_CONFIG` file | hot: the registry is rebuilt and swapped; the next tool selection lists the new scripts |
+| `mcp.serverCommand`, `mcp.serverArgs` (string[]), `mcp.toolsMapping` (same document as `config/mcp-tools.*.json`), `mcp.callTimeoutMs` | `MCP_SERVER_COMMAND`, `MCP_SERVER_ARGS`, `MCP_TOOLS_CONFIG` file, `MCP_CALL_TIMEOUT_MS` | restart: stored, reported in `restartRequired` / `pendingRestart` (no live MCP reconnection) |
+
+`LLM_API_KEY`, `MCP_TOOL_*`, the API tokens, paths and every other variable stay env-only.
+
+- **Validation:** a patch is a strict zod object (unknown keys and the secret are refused). The candidate configuration then goes through the existing resolvers: `resolveLlmSettings` (e.g. `anthropic` without a key → issue `llm`), the MCP mapping schema (`mcp.toolsMapping`) and `buildScriptRegistry` with its write guard: a registry from the panel must register **every** entry, so an entry without `readOnly: true` or flagged by the guard is a `422` with `scripts.registry.<id>` and its reason. Nothing is stored or applied when any check fails. Changes are serialized.
+- **In-flight jobs:** the graph holds a `SwitchableLlm`: each model call goes to the model current when the call starts, so a job running during a change finishes its remaining calls with the new model. A tool call that already resolved its script keeps the old registry entry.
+- **Startup:** an invalid effective configuration fails like an invalid `.env` today; the message lists the LLM keys that come from the panel. A registry stored from the panel is rebuilt at startup with the same guard (entries that no longer pass are skipped with a warning).
+- **Config view** (`GET /v1/config`, also `config` in change responses): `settings.<group>.<name>` is `{ value, source, restartRequired, updatedAt? }`, except `settings.llm.anthropicApiKey`: `{ set, source, updatedAt? }`. Plus `llm.description` (e.g. `qwen3:8b @ http://localhost:11434/v1`), `scripts: { registered: string[], rejected: [{ id, reason }] }` and `pendingRestart` (restart-only keys that differ from the running values).
+- **Models:** `GET /v1/config/models` asks `GET <baseUrl>/models` (OpenAI-compatible; Ollama supports it) only when the effective provider is `openai-compatible` and the base URL host is `localhost`, `127.0.0.1` or `::1`; no redirects, 5 s bound. Otherwise `{ models: [], reason }`.
 
 ## Daily conversation log
 
