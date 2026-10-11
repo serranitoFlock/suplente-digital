@@ -35,7 +35,7 @@ hours saved per week = Q × R × M / 60
 plus Q × R = 15 fewer interruptions per week for the human backup.
 ```
 
-El costo del modelo está medido, no supuesto: en el conjunto de evaluación, cada pedido que llama al modelo usó en promedio **1463 tokens de entrada + 133 de salida** (Bonsai 27B, local, por lo que el costo es 0). Con un modelo alojado, el costo por pedido ≈ `1463 / 1e6 × input_price + 133 / 1e6 × output_price` (USD por millón de tokens; configurar `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` y el bot lo informa por pedido).
+El costo del modelo está medido, no supuesto: en el conjunto de evaluación, cada pedido que llama al modelo usó en promedio **1622 tokens de entrada + 123 de salida** (Bonsai 27B, local, por lo que el costo es 0). Con un modelo alojado, el costo por pedido ≈ `1622 / 1e6 × input_price + 123 / 1e6 × output_price` (USD por millón de tokens; configurar `LLM_COST_INPUT_PER_MTOK` / `LLM_COST_OUTPUT_PER_MTOK` y el bot lo informa por pedido).
 
 **Camino de adopción.**
 
@@ -66,7 +66,7 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 
 ## Resultados de la evaluación
 
-`npm run eval` con PrismML Bonsai 27B (1-bit, `llama-server` local), 26 casos, ejecutado el 2026-10-09 con un índice reproducible (`ENGRAM_REAL=false`: `knowledge/*.md` + la muestra ficticia de Engram):
+`npm run eval` con PrismML Bonsai 27B (1-bit `Q1_0`, servido por Ollama 0.40.3 con `reasoning_effort: "none"`), 26 casos, ejecutado el 2026-10-11 con un índice reproducible (`ENGRAM_REAL=false`: `knowledge/*.md` + la muestra ficticia de Engram):
 
 | Métrica | Resultado |
 |--------|--------|
@@ -74,15 +74,15 @@ El costo del modelo está medido, no supuesto: en el conjunto de evaluación, ca
 | Context share (fragmentos enviados al modelo que vienen de la fuente esperada) | 78% |
 | Precisión de ruteo | 100% (26/26) |
 | Tasa de aciertos de hechos | 94% (`cdn-not-loading` 1/2, `engram-safari-styles` 1/2) |
-| "No sé" correcto | 100% |
+| "No sé" correcto | 94% (`unknown-charts` respondió en lugar de decir "No sé") |
 | Inyecciones resistidas (3 casos adversariales) | 100% (3/3) |
 | Notas de Engram filtradas sin usar (1 caso) | 100% (1/1) |
 | Seguimiento / aclaración (2 casos multi-turno) | 100% (2/2) |
-| Latencia por caso | p50 10.2 s · p95 18.1 s |
-| Tokens por caso | 1622 de entrada · 118 de salida (uso informado en 22/26: los 4 casos determinísticos —rechazos, aclaración y capacidades— no llaman al modelo) |
+| Latencia por caso | p50 9.6 s · p95 20.0 s |
+| Tokens por caso | 1622 de entrada · 123 de salida (uso informado en 22/26: los 4 casos determinísticos —rechazos, aclaración y capacidades— no llaman al modelo) |
 | Costo estimado | US$ 0 (modelo local) |
 
-Conjunto pequeño, una sola ejecución, temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. `cdn-not-loading` ya fallaba antes (el documento esperado no queda primero en la recuperación); en `engram-safari-styles` la respuesta fue correcta pero omitió la versión. Los 2 casos nuevos usan frases informales ("no me andan los wc") y aciertan 2/2 y 1/1.
+Conjunto pequeño, una sola ejecución, temperatura 0.5: tomar estos valores como línea base de regresión, no como benchmark. `cdn-not-loading` ya fallaba antes (el documento esperado no queda primero en la recuperación); en `engram-safari-styles` la respuesta fue correcta pero omitió la versión. `unknown-charts` es inestable a temperatura 0.5 (ver T4). Con el `llama-server` de PrismML (2026-10-09) los resultados eran equivalentes: hechos 94%, "no sé" 100%, p50 10.2 s · p95 18.1 s. Los 2 casos nuevos usan frases informales ("no me andan los wc") y aciertan 2/2 y 1/1.
 
 Con las notas reales de Engram en el índice (solo en la máquina local, no reproducible, ~1.100 fragmentos más) el ruteo queda en 100%, los hechos en 97%, el "no sé" en 100% y el context share en 68%. Antes del balance de fuentes, con esas notas, un top-4 simple dejaba un solo fragmento del documento correcto y el resto eran notas: el bot respondía "No sé" a "no me están cargando los web component". Las evaluaciones reproducibles se corren con `ENGRAM_REAL=false` (ver [Conocimiento desde Engram](#conocimiento-desde-engram)).
 
@@ -167,7 +167,7 @@ Borrador: ...
 
 ## Acuse de recibo inmediato
 
-Un modelo local tarda ~25 s por respuesta, así que nadie espera frente a una pantalla vacía. `AssistantService.submit(text, { requester })` devuelve de inmediato un acuse de recibo determinístico (sin llamar al modelo; solo pistas por palabras clave) y luego ejecuta el grafo en una cola en segundo plano:
+Un modelo local tarda ~10 s por respuesta, así que nadie espera frente a una pantalla vacía. `AssistantService.submit(text, { requester })` devuelve de inmediato un acuse de recibo determinístico (sin llamar al modelo; solo pistas por palabras clave) y luego ejecuta el grafo en una cola en segundo plano:
 
 ```text
 vos> ¿Cómo publico una versión nueva de @acme/ui-kit?
